@@ -52,6 +52,65 @@ message  ProcessOutput {
   OutputType output_type = 2;
 }
 
+/**
+ * 模块事件
+ *
+ * 当模块被加载或卸载时发送
+ */
+message ModuleEvent {
+
+  EventType event_type = 1;
+  repeated Module modules = 2;
+}
+
+/**
+ * 断点变更事件
+ *
+ * 当断点状态发生变化时发送
+ */
+message BreakpointChangedEvent {
+  // 断点信息
+  Breakpoint breakpoint = 1;
+
+  // 变更类型
+  BreakpointEventType change_type = 2;
+
+  // 变更描述（可选）
+  optional string description = 3;
+}
+
+/**
+ * 线程状态变更事件
+ *
+ * 当线程状态发生变化时发送
+ */
+message ThreadStateChangedEvent {
+  // 线程信息
+  Thread thread = 1;
+
+  // 状态变更类型
+  ThreadStateChangeType change_type = 2;
+
+  // 变更描述（可选）
+  optional string description = 3;
+}
+
+/**
+ * 符号加载事件
+ *
+ * 当调试符号被加载时发送
+ */
+message SymbolsLoadedEvent {
+  // 模块信息
+  Module module = 1;
+
+  // 加载的符号数量
+  uint32 symbol_count = 2;
+
+  // 符号文件路径（可选）
+  optional string symbol_file_path = 3;
+}
+
 
 
 /* =========================================================================
@@ -71,7 +130,17 @@ message Event {
     // 控制台输出
     ProcessOutput process_output = 7;
 
+    // 模块事件
+    ModuleEvent module_event = 8;
 
+    // 断点事件
+    BreakpointChangedEvent breakpoint_changed_event = 9;
+
+    // 线程状态事件
+    ThreadStateChangedEvent thread_state_changed_event = 10;
+
+    // 符号加载事件
+    SymbolsLoadedEvent symbols_loaded_event = 11;
   }
 }
 

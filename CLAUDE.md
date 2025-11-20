@@ -77,7 +77,7 @@ This is a **Cangjie language debugger** built using a layered architecture with 
 ### Core Components
 
 1. **LLDB Integration Layer** (`src/client/DebuggerClient.cpp`, `src/client/TcpClient.cpp`)
-   - Dynamically loads LLDB without compile-time dependencies (`USE_DYNAMIC_LLDB`)
+   - Dynamically links with LLDB libraries at runtime
    - Provides C++ wrappers around LLDB C++ API
    - Handles platform-specific LLDB integration (Windows/Linux/macOS)
    - Main executable: `CangJieLLDBFrontend`
@@ -132,10 +132,10 @@ The project uses a custom LLDB-focused protocol with Chinese comments and detail
 
 The debugger uses LLDB's C++ API with dynamic loading patterns:
 
-**Dynamic Loading (`USE_DYNAMIC_LLDB`)**:
-- Runtime loading of `liblldb.dll/.so/.dylib` without compile-time dependencies
-- Platform-specific library search and loading
-- Fallback to system-installed LLDB
+**Dynamic LLDB Linking**:
+- Runtime dynamic linking with `liblldb.dll/.so/.dylib`
+- Platform-specific library linking
+- Consistent LLDB API usage across platforms
 
 **LLDB Object Management**:
 - `lldb::SBDebugger`, `lldb::SBTarget`, `lldb::SBProcess`, `lldb::SBThread`
@@ -182,8 +182,7 @@ The debugger uses LLDB's C++ API with dynamic loading patterns:
    - Test regeneration with `cmake --build . --target regenerate_protoids`
 
 3. **LLDB Integration**:
-   - Check `USE_DYNAMIC_LLDB` compile definition for dynamic loading mode
-   - Use LLDB headers from `third_party/llvm-project/lldb/include/` when available
+   - Use LLDB headers from `third_party/llvm-project/lldb/include/`
    - Test across platforms due to LLDB API differences
    - Ensure proper ID mapping between protocol and LLDB objects
 
@@ -210,7 +209,7 @@ The debugger uses LLDB's C++ API with dynamic loading patterns:
 
 ### Development Notes
 
-- The project supports both static and dynamic LLDB linking via `USE_DYNAMIC_LLDB`
+- The project uses dynamic LLDB linking for consistent cross-platform support
 - Protocol Buffers messages are automatically regenerated when `.proto` files change
 - Logging is available via `LOG_INFO()`, `LOG_ERROR()`, etc. macros from `Logger.h`
 - All LLDB operations should check `IsValid()` before use

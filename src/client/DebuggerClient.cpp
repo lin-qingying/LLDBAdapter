@@ -28,14 +28,14 @@ namespace Cangjie::Debugger {
     DebuggerClient::DebuggerClient(TcpClient &tcp_client)
         : tcp_client_(tcp_client)
           , breakpoint_manager_(std::make_unique<cangjie::debugger::BreakpointManager>())
-
-#ifdef USE_DYNAMIC_LLDB
           , debugger_()
           , target_()
           , process_()
           , lldb_initialized_(false)
-#endif
-          , event_thread_running_(false) {
+          , event_thread_()
+          , event_thread_running_(false)
+          , event_listener_()
+          , variable_id_map_() {
         // 在构造时初始化 LLDB
         InitializeLLDB();
     }
@@ -1592,7 +1592,7 @@ namespace Cangjie::Debugger {
                 uint64_t variable_id = AllocateVariableId(req.thread_id().id(), req.frame_index(), sb_value);
 
                 // 使用 ProtoConverter 将 LLDB 变量转换为 protobuf 变量
-                lldbprotobuf::Variable proto_var = ProtoConverter::CreateVariable(sb_value,variable_id);
+                lldbprotobuf::Variable proto_var = ProtoConverter::CreateVariable(sb_value, variable_id);
 
 
                 variables.push_back(proto_var);
@@ -1623,7 +1623,7 @@ namespace Cangjie::Debugger {
                 try {
                     uint64_t variable_id = AllocateVariableId(req.thread_id().id(), req.frame_index(), reg_value);
 
-                    lldbprotobuf::Variable proto_var = ProtoConverter::CreateVariable(reg_value,variable_id);
+                    lldbprotobuf::Variable proto_var = ProtoConverter::CreateVariable(reg_value, variable_id);
 
                     variables.push_back(proto_var);
 
@@ -1869,12 +1869,100 @@ namespace Cangjie::Debugger {
         return tcp_client_.SendEventBroadcast(event);
     }
 
+    bool DebuggerClient::SendProcessOutputEvent(const std::string &text, lldbprotobuf::OutputType output_type) const {
+        // Use ProtoConverter to create ProcessOutput event
+        lldbprotobuf::ProcessOutput process_output = ProtoConverter::CreateProcessOutputEvent(text, output_type);
+
+        // Create the event and send it
+        lldbprotobuf::Event event;
+        *event.mutable_process_output() = process_output;
+
+        LOG_INFO(
+            "Broadcasting ProcessOutput event: type=" + std::to_string(output_type) + ", length=" + std::to_string(text.
+                length()));
+        return tcp_client_.SendEventBroadcast(event);
+    }
+
+    // 新增事件发送函数实现
+    bool DebuggerClient::SendModuleLoadedEvent(const std::vector<lldbprotobuf::Module> &modules) const {
+        if (modules.empty()) {
+            return true; // 没有模块需要发送
+        }
+
+        lldbprotobuf::ModuleEvent module_event = ProtoConverter::CreateModuleLoadedEvent(modules);
+
+        lldbprotobuf::Event event;
+        *event.mutable_module_event() = module_event;
+
+        LOG_INFO("Broadcasting ModuleLoaded event: " + std::to_string(modules.size()) + " modules");
+        return tcp_client_.SendEventBroadcast(event);
+    }
+
+    bool DebuggerClient::SendModuleUnloadedEvent(const std::vector<lldbprotobuf::Module> &modules) const {
+        if (modules.empty()) {
+            return true; // 没有模块需要发送
+        }
+
+        lldbprotobuf::ModuleEvent module_event = ProtoConverter::CreateModuleUnloadedEvent(modules);
+
+        lldbprotobuf::Event event;
+        *event.mutable_module_event() = module_event;
+
+        LOG_INFO("Broadcasting ModuleUnloaded event: " + std::to_string(modules.size()) + " modules");
+        return tcp_client_.SendEventBroadcast(event);
+    }
+
+    bool DebuggerClient::SendBreakpointChangedEvent(
+        const lldbprotobuf::Breakpoint &breakpoint,
+        lldbprotobuf::BreakpointEventType change_type,
+        const std::string &description) const {
+        lldbprotobuf::BreakpointChangedEvent bp_event = ProtoConverter::CreateBreakpointChangedEvent(
+            breakpoint, change_type, description);
+
+        lldbprotobuf::Event event;
+        *event.mutable_breakpoint_changed_event() = bp_event;
+
+        LOG_INFO("Broadcasting BreakpointChanged event: breakpoint_id=" + std::to_string(breakpoint.id().id()) +
+            ", change_type=" + std::to_string(change_type));
+        return tcp_client_.SendEventBroadcast(event);
+    }
+
+    bool DebuggerClient::SendThreadStateChangedEvent(
+        const lldbprotobuf::Thread &thread,
+        lldbprotobuf::ThreadStateChangeType change_type,
+        const std::string &description) const {
+        lldbprotobuf::ThreadStateChangedEvent thread_event = ProtoConverter::CreateThreadStateChangedEvent(
+            thread, change_type, description);
+
+        lldbprotobuf::Event event;
+        *event.mutable_thread_state_changed_event() = thread_event;
+
+        LOG_INFO("Broadcasting ThreadStateChanged event: thread_id=" + std::to_string(thread.thread_id().id()) +
+            ", change_type=" + std::to_string(change_type));
+        return tcp_client_.SendEventBroadcast(event);
+    }
+
+    bool DebuggerClient::SendSymbolsLoadedEvent(
+        const lldbprotobuf::Module &module,
+        uint32_t symbol_count,
+        const std::string &symbol_file_path) const {
+        lldbprotobuf::SymbolsLoadedEvent symbols_event = ProtoConverter::CreateSymbolsLoadedEvent(
+            module, symbol_count, symbol_file_path);
+
+        lldbprotobuf::Event event;
+        *event.mutable_symbols_loaded_event() = symbols_event;
+
+        LOG_INFO("Broadcasting SymbolsLoaded event: module=" + module.name() +
+            ", symbol_count=" + std::to_string(symbol_count));
+        return tcp_client_.SendEventBroadcast(event);
+    }
+
 
     // ============================================================================
     // Comprehensive Event Handling Implementation
     // ============================================================================
 
-    void DebuggerClient::SetupAllEventListeners()   {
+    void DebuggerClient::SetupAllEventListeners() {
         // LOG_INFO("Setting up comprehensive LLDB event listeners");
         //
         // if (!event_listener_.IsValid()) {
@@ -1933,7 +2021,7 @@ namespace Cangjie::Debugger {
         // LOG_INFO("All LLDB event listeners setup completed");
     }
 
-    void DebuggerClient::HandleEvent(    lldb::SBEvent &event)   {
+    void DebuggerClient::HandleEvent(lldb::SBEvent &event) {
         // 处理进程事件
         if (lldb::SBProcess::EventIsProcessEvent(event)) {
             HandleProcessEvent(event);
@@ -2024,7 +2112,11 @@ namespace Cangjie::Debugger {
             char buffer[1024];
             size_t num_bytes;
             while ((num_bytes = process_.GetSTDOUT(buffer, sizeof(buffer))) > 0) {
-                LOG_INFO("[STDOUT] " + std::string(buffer, num_bytes));
+                std::string output_text(buffer, num_bytes);
+                LOG_INFO("[STDOUT] " + output_text);
+
+                // 发送 ProcessOutput 事件
+                SendProcessOutputEvent(output_text, lldbprotobuf::OutputTypeStdout);
             }
         }
 
@@ -2033,23 +2125,138 @@ namespace Cangjie::Debugger {
             char buffer[1024];
             size_t num_bytes;
             while ((num_bytes = process_.GetSTDERR(buffer, sizeof(buffer))) > 0) {
-                LOG_ERROR("[STDERR] " + std::string(buffer, num_bytes));
+                std::string error_text(buffer, num_bytes);
+                LOG_ERROR("[STDERR] " + error_text);
+
+                // 发送 ProcessOutput 事件
+                SendProcessOutputEvent(error_text, lldbprotobuf::OutputTypeStderr);
             }
         }
     }
 
-    void DebuggerClient::HandleTargetEvent(const lldb::SBEvent &event) {
-        LOG_INFO("[Target Event] ");
 
-        if (event.GetType() & lldb::SBTarget::eBroadcastBitModulesLoaded) {
+    void DebuggerClient::HandleTargetEvent(const lldb::SBEvent &event) {
+        LOG_INFO("[Target Event]");
+
+        lldb::SBTarget target = lldb::SBTarget::GetTargetFromEvent(event);
+        if (!target.IsValid()) {
+            LOG_WARNING("Invalid target in event");
+            return;
+        }
+
+        const uint32_t event_type = event.GetType();
+
+        if (event_type & lldb::SBTarget::eBroadcastBitModulesLoaded) {
             LOG_INFO("Modules loaded");
             LogLoadedModules(event);
-        } else if (event.GetType() & lldb::SBTarget::eBroadcastBitModulesUnloaded) {
+
+            std::vector<lldbprotobuf::Module> modules;
+            uint32_t num_modules = target.GetNumModulesFromEvent(event);
+            for (uint32_t i = 0; i < num_modules; ++i) {
+                lldb::SBModule sb_module = target.GetModuleAtIndexFromEvent(i, event);
+                if (!sb_module.IsValid()) continue;
+
+                lldbprotobuf::Module module;
+                // LLDB15 没有 GetUUID，使用索引或路径生成唯一 ID
+                *module.mutable_id() = sb_module.GetUUIDString();
+
+                char path_buf[1024] = {0};
+                sb_module.GetFileSpec().GetPath(path_buf, sizeof(path_buf));
+                module.set_file_path(path_buf);
+
+
+                module.set_name(sb_module.GetFileSpec().GetFilename());
+
+                module.set_is_loaded(true);
+
+                // 获取基址
+                lldb::addr_t base_address = 0;
+                if (sb_module.GetNumSections() > 0) {
+                    lldb::SBSection first_section = sb_module.GetSectionAtIndex(0);
+                    if (first_section.IsValid()) {
+                        base_address = first_section.GetLoadAddress(target);
+                        if (base_address == LLDB_INVALID_ADDRESS) base_address = 0;
+                    }
+                }
+                module.set_base_address(base_address);
+
+
+                modules.push_back(module);
+            }
+
+            SendModuleLoadedEvent(modules);
+        } else if (event_type & lldb::SBTarget::eBroadcastBitModulesUnloaded) {
             LOG_INFO("Modules unloaded");
-        } else if (event.GetType() & lldb::SBTarget::eBroadcastBitBreakpointChanged) {
+
+            std::vector<lldbprotobuf::Module> modules;
+            uint32_t num_modules = target.GetNumModulesFromEvent(event);
+            for (uint32_t i = 0; i < num_modules; ++i) {
+                lldb::SBModule sb_module = target.GetModuleAtIndexFromEvent(i, event);
+
+                if (!sb_module.IsValid()) continue;
+
+                lldbprotobuf::Module module;
+
+                *module.mutable_id() = sb_module.GetUUIDString();
+
+                char path_buf[1024] = {0};
+                sb_module.GetFileSpec().GetPath(path_buf, sizeof(path_buf));
+                module.set_file_path(path_buf);
+
+
+                module.set_name(sb_module.GetFileSpec().GetFilename());
+
+                module.set_is_loaded(true);
+
+                // 获取基址
+                lldb::addr_t base_address = 0;
+                if (sb_module.GetNumSections() > 0) {
+                    lldb::SBSection first_section = sb_module.GetSectionAtIndex(0);
+                    if (first_section.IsValid()) {
+                        base_address = first_section.GetLoadAddress(target);
+                        if (base_address == LLDB_INVALID_ADDRESS) base_address = 0;
+                    }
+                }
+                module.set_base_address(base_address);
+
+
+                modules.push_back(module);
+            }
+
+            SendModuleUnloadedEvent(modules);
+        } else if (event_type & lldb::SBTarget::eBroadcastBitBreakpointChanged) {
             LOG_INFO("Breakpoints changed");
-        } else if (event.GetType() & lldb::SBTarget::eBroadcastBitSymbolsLoaded) {
+          
+        } else if (event_type & lldb::SBTarget::eBroadcastBitSymbolsLoaded) {
             LOG_INFO("Symbols loaded");
+            std::vector<lldbprotobuf::Module> modules;
+            uint32_t num_modules = target.GetNumModulesFromEvent(event);
+
+            for (uint32_t i = 0; i < num_modules; ++i) {
+                lldb::SBModule sb_module = target.GetModuleAtIndexFromEvent(i, event);
+
+                if (!sb_module.IsValid()) continue;
+
+                // 假设最近加载的模块就是事件对应模块
+                lldbprotobuf::Module module;
+                *module.mutable_id() = sb_module.GetUUIDString();
+
+                char path_buf[1024] = {0};
+                sb_module.GetFileSpec().GetPath(path_buf, sizeof(path_buf));
+                module.set_file_path(path_buf);
+
+
+                module.set_name(sb_module.GetFileSpec().GetFilename());
+
+                module.set_has_symbols(true);
+
+                // 获取符号数量
+                uint32_t symbol_count = sb_module.GetNumSymbols();
+                char path_buf1[1024] = {0};
+                sb_module.GetSymbolFileSpec().GetPath(path_buf1, sizeof(path_buf1));
+                SendSymbolsLoadedEvent(module, symbol_count, path_buf1);
+                break; // 只处理一个模块
+            }
         } else {
             LOG_INFO("Unknown target event");
         }
@@ -2061,60 +2268,190 @@ namespace Cangjie::Debugger {
 
         LOG_INFO("[Breakpoint Event] Breakpoint #" + std::to_string(bp.GetID()) + " - ");
 
+        if (!bp.IsValid()) {
+            LOG_INFO("Invalid breakpoint in event");
+            return;
+        }
+
+        // 转换断点事件类型
+        lldbprotobuf::BreakpointEventType proto_event_type = ConvertBreakpointEventType(event_type);
+
+        // 创建断点对象
+        int64_t breakpoint_id = bp.GetID();
+
+        // 提取源码位置信息
+        lldbprotobuf::SourceLocation source_location;
+        size_t num_locations = bp.GetNumLocations();
+        for (size_t i = 0; i < num_locations; ++i) {
+            lldb::SBBreakpointLocation loc = bp.GetLocationAtIndex(i);
+            if (loc.IsValid()) {
+                lldb::SBAddress addr = loc.GetAddress();
+                if (addr.IsValid()) {
+                    lldb::SBLineEntry line_entry = addr.GetLineEntry();
+                    if (line_entry.IsValid()) {
+                        lldb::SBFileSpec file_spec = line_entry.GetFileSpec();
+                        if (file_spec.IsValid()) {
+                            char file_path_buffer[1024];
+                            file_spec.GetPath(file_path_buffer, sizeof(file_path_buffer));
+                            source_location = ProtoConverter::CreateSourceLocation(
+                                file_path_buffer,
+                                line_entry.GetLine()
+                            );
+                            break;  // 使用第一个有效的位置
+                        }
+                    }
+                }
+            }
+        }
+
+        // 如果没有找到有效的位置信息，创建默认位置
+        if (source_location.file_path().empty() && source_location.line() == 0) {
+            source_location = ProtoConverter::CreateSourceLocation("", 0);
+        }
+
+        // 获取断点条件
+        std::string condition = bp.GetCondition() ? bp.GetCondition() : "";
+
+        lldbprotobuf::Breakpoint proto_breakpoint = ProtoConverter::CreateBreakpoint(
+            breakpoint_id,
+            source_location,
+            condition
+        );
+
+        std::string description;
         switch (event_type) {
             case lldb::eBreakpointEventTypeAdded:
                 LOG_INFO("Added");
+                description = "Breakpoint added";
                 break;
             case lldb::eBreakpointEventTypeRemoved:
                 LOG_INFO("Removed");
+                description = "Breakpoint removed";
                 break;
             case lldb::eBreakpointEventTypeLocationsAdded:
                 LOG_INFO("Locations added");
+                description = "Breakpoint locations added";
                 break;
             case lldb::eBreakpointEventTypeLocationsRemoved:
                 LOG_INFO("Locations removed");
+                description = "Breakpoint locations removed";
                 break;
             case lldb::eBreakpointEventTypeLocationsResolved:
                 LOG_INFO("Locations resolved");
+                description = "Breakpoint locations resolved";
                 break;
             case lldb::eBreakpointEventTypeEnabled:
                 LOG_INFO("Enabled");
+                description = "Breakpoint enabled";
                 break;
             case lldb::eBreakpointEventTypeDisabled:
                 LOG_INFO("Disabled");
+                description = "Breakpoint disabled";
                 break;
             case lldb::eBreakpointEventTypeCommandChanged:
                 LOG_INFO("Command changed");
+                description = "Breakpoint command changed";
                 break;
             case lldb::eBreakpointEventTypeConditionChanged:
                 LOG_INFO("Condition changed");
+                description = "Breakpoint condition changed";
                 break;
             default:
                 LOG_INFO("Unknown event type");
+                description = "Unknown breakpoint event";
+                proto_event_type = lldbprotobuf::BREAKPOINT_EVENT_TYPE_UNKNOWN;
                 break;
         }
+
+        // 发送断点变化事件到前端
+        SendBreakpointChangedEvent(proto_breakpoint, proto_event_type, description);
     }
 
     void DebuggerClient::HandleThreadEvent(const lldb::SBEvent &event) {
-        LOG_INFO("[Thread Event] ");
+        LOG_INFO("[Thread Event]");
 
-        if (event.GetType() & lldb::SBThread::eBroadcastBitStackChanged) {
-            LOG_INFO("Stack changed");
+        // 从事件中获取线程信息
+        lldb::SBThread thread = lldb::SBThread::GetThreadFromEvent(event);
+        if (!thread.IsValid()) {
+            LOG_WARNING("Invalid thread in event");
+            return;
         }
-        if (event.GetType() & lldb::SBThread::eBroadcastBitThreadSuspended) {
-            LOG_INFO("Thread suspended");
+
+        uint32_t event_type = event.GetType();
+        std::string description;
+        lldbprotobuf::ThreadStateChangeType change_type = lldbprotobuf::THREAD_STATE_CHANGE_TYPE_UNKNOWN;
+
+        // 根据事件类型确定变化类型和描述
+        if (event_type & lldb::SBThread::eBroadcastBitStackChanged) {
+            LOG_INFO("Stack changed for thread " + std::to_string(thread.GetThreadID()));
+            change_type = lldbprotobuf::THREAD_STATE_CHANGE_TYPE_STACK_CHANGED;
+            description = "Thread stack changed";
         }
-        if (event.GetType() & lldb::SBThread::eBroadcastBitThreadResumed) {
-            LOG_INFO("Thread resumed");
+        if (event_type & lldb::SBThread::eBroadcastBitThreadSuspended) {
+            LOG_INFO("Thread " + std::to_string(thread.GetThreadID()) + " suspended");
+            change_type = lldbprotobuf::THREAD_STATE_CHANGE_TYPE_THREAD_SUSPENDED;
+            description = "Thread suspended";
         }
-        if (event.GetType() & lldb::SBThread::eBroadcastBitSelectedFrameChanged) {
-            LOG_INFO("Selected frame changed");
+        if (event_type & lldb::SBThread::eBroadcastBitThreadResumed) {
+            LOG_INFO("Thread " + std::to_string(thread.GetThreadID()) + " resumed");
+            change_type = lldbprotobuf::THREAD_STATE_CHANGE_TYPE_THREAD_RESUMED;
+            description = "Thread resumed";
         }
-        if (event.GetType() & lldb::SBThread::eBroadcastBitThreadSelected) {
-            LOG_INFO("Thread selected");
+        if (event_type & lldb::SBThread::eBroadcastBitSelectedFrameChanged) {
+            LOG_INFO("Selected frame changed for thread " + std::to_string(thread.GetThreadID()));
+            change_type = lldbprotobuf::THREAD_STATE_CHANGE_TYPE_SELECTED_FRAME_CHANGED;
+            description = "Selected frame changed";
+        }
+        if (event_type & lldb::SBThread::eBroadcastBitThreadSelected) {
+            LOG_INFO("Thread " + std::to_string(thread.GetThreadID()) + " selected");
+            change_type = lldbprotobuf::THREAD_STATE_CHANGE_TYPE_THREAD_SELECTED;
+            description = "Thread selected";
+        }
+
+        // 如果检测到了有效的变化类型，发送线程状态变化事件
+        if (change_type != lldbprotobuf::THREAD_STATE_CHANGE_TYPE_UNKNOWN) {
+            try {
+                // 创建线程对象
+                lldbprotobuf::Thread proto_thread = ProtoConverter::CreateThread(thread);
+
+                // 发送线程状态变化事件到前端
+                SendThreadStateChangedEvent(proto_thread, change_type, description);
+            } catch (const std::exception &e) {
+                LOG_ERROR("Failed to send thread state changed event: " + std::string(e.what()));
+            }
+        } else {
+            LOG_WARNING("Unknown thread event type: " + std::to_string(event_type));
         }
     }
 
+    // ============================================================================
+    // Helper Functions
+    // ============================================================================
+
+    lldbprotobuf::BreakpointEventType DebuggerClient::ConvertBreakpointEventType(lldb::BreakpointEventType lldb_type) const {
+        switch (lldb_type) {
+            case lldb::eBreakpointEventTypeAdded:
+                return lldbprotobuf::BREAKPOINT_EVENT_TYPE_ADDED;
+            case lldb::eBreakpointEventTypeRemoved:
+                return lldbprotobuf::BREAKPOINT_EVENT_TYPE_REMOVED;
+            case lldb::eBreakpointEventTypeLocationsAdded:
+                return lldbprotobuf::BREAKPOINT_EVENT_TYPE_LOCATIONS_ADDED;
+            case lldb::eBreakpointEventTypeLocationsRemoved:
+                return lldbprotobuf::BREAKPOINT_EVENT_TYPE_LOCATIONS_REMOVED;
+            case lldb::eBreakpointEventTypeLocationsResolved:
+                return lldbprotobuf::BREAKPOINT_EVENT_TYPE_LOCATIONS_RESOLVED;
+            case lldb::eBreakpointEventTypeEnabled:
+                return lldbprotobuf::BREAKPOINT_EVENT_TYPE_ENABLED;
+            case lldb::eBreakpointEventTypeDisabled:
+                return lldbprotobuf::BREAKPOINT_EVENT_TYPE_DISABLED;
+            case lldb::eBreakpointEventTypeCommandChanged:
+                return lldbprotobuf::BREAKPOINT_EVENT_TYPE_COMMAND_CHANGED;
+            case lldb::eBreakpointEventTypeConditionChanged:
+                return lldbprotobuf::BREAKPOINT_EVENT_TYPE_CONDITION_CHANGED;
+            default:
+                return lldbprotobuf::BREAKPOINT_EVENT_TYPE_UNKNOWN;
+        }
+    }
 
     void DebuggerClient::LogBreakpointInfo(lldb::SBThread &thread) const {
         uint64_t bp_id = thread.GetStopReasonDataAtIndex(0);
@@ -2169,7 +2506,7 @@ namespace Cangjie::Debugger {
 
         try {
             // 创建变量信息
-            lldbprotobuf::Variable variable = ProtoConverter::CreateVariable(sb_value,   req.variable_id().id());
+            lldbprotobuf::Variable variable = ProtoConverter::CreateVariable(sb_value, req.variable_id().id());
 
             // 创建值信息
             lldbprotobuf::Value value = ProtoConverter::CreateValue(
@@ -2239,7 +2576,7 @@ namespace Cangjie::Debugger {
 
             // 创建变量信息
             lldbprotobuf::Variable variable = ProtoConverter::CreateVariable(sb_value,
-                req.variable_id().id());
+                                                                             req.variable_id().id());
 
             // 创建值信息
             lldbprotobuf::Value value = ProtoConverter::CreateValue(
@@ -2328,7 +2665,7 @@ namespace Cangjie::Debugger {
                 uint64_t child_id = AllocateVariableId(thread_id, frame_index, child_value);
 
                 // 创建子变量信息
-                lldbprotobuf::Variable child_variable = ProtoConverter::CreateVariable(child_value,child_id);
+                lldbprotobuf::Variable child_variable = ProtoConverter::CreateVariable(child_value, child_id);
                 children.push_back(child_variable);
 
                 LOG_INFO("  Child: " + std::string(child_value.GetName() ? child_value.GetName() : "unnamed") +
@@ -2360,7 +2697,6 @@ namespace Cangjie::Debugger {
     }
 
     lldbprotobuf::HashId DebuggerClient::CreateHashId(unsigned long long value) const {
-
         lldbprotobuf::HashId hash;
 
         hash.set_hash(value);
@@ -2370,7 +2706,7 @@ namespace Cangjie::Debugger {
     bool DebuggerClient::SendReadMemoryResponse(bool success, uint64_t address, const std::string &data,
                                                 const std::string &error_message,
                                                 const std::optional<uint64_t> hash) const {
-        auto read_memory_resp = ProtoConverter::CreateReadMemoryResponse(success,   data, error_message);
+        auto read_memory_resp = ProtoConverter::CreateReadMemoryResponse(success, data, error_message);
 
         lldbprotobuf::Response response;
         if (hash.has_value()) {
@@ -2396,8 +2732,8 @@ namespace Cangjie::Debugger {
         // 验证进程是否有效
         if (!process_.IsValid()) {
             LOG_ERROR("No valid process available for expression evaluation");
-           lldbprotobuf::Variable empty_value;
-            return SendEvaluateResponse(false, empty_value,  "No valid process available", hash);
+            lldbprotobuf::Variable empty_value;
+            return SendEvaluateResponse(false, empty_value, "No valid process available", hash);
         }
 
         // 查找指定的线程
@@ -2417,7 +2753,7 @@ namespace Cangjie::Debugger {
 
             if (!thread_found) {
                 LOG_ERROR("Thread not found for expression evaluation: " + std::to_string(req.thread_id().id()));
-             lldbprotobuf::Variable empty_value;
+                lldbprotobuf::Variable empty_value;
                 return SendEvaluateResponse(false, empty_value, "Thread not found", hash);
             }
         } else {
@@ -2439,7 +2775,7 @@ namespace Cangjie::Debugger {
                 LOG_ERROR(
                     "Frame index out of range: " + std::to_string(req.frame_index()) + " >= " + std::to_string(
                         num_frames));
-               lldbprotobuf::Variable empty_value;
+                lldbprotobuf::Variable empty_value;
                 return SendEvaluateResponse(false, empty_value, "Frame index out of range", hash);
             }
 
@@ -2451,7 +2787,7 @@ namespace Cangjie::Debugger {
 
         if (!target_frame.IsValid()) {
             LOG_ERROR("Invalid frame for expression evaluation");
-          lldbprotobuf::Variable empty_value;
+            lldbprotobuf::Variable empty_value;
             return SendEvaluateResponse(false, empty_value, "Invalid frame", hash);
         }
 
@@ -2472,11 +2808,11 @@ namespace Cangjie::Debugger {
                 target_thread.GetThreadID(),
                 target_frame.GetFrameID(),
                 result);
-            lldbprotobuf::Variable variable = ProtoConverter::CreateVariable(result,variable_id);
+            lldbprotobuf::Variable variable = ProtoConverter::CreateVariable(result, variable_id);
             if (error.Fail()) {
                 std::string error_msg = error.GetCString() ? error.GetCString() : "Expression evaluation failed";
                 LOG_ERROR("Expression evaluation failed: " + error_msg);
-                    lldbprotobuf::Variable empty_value;
+                lldbprotobuf::Variable empty_value;
                 return SendEvaluateResponse(false, empty_value, "Expression evaluation failed: " + error_msg, hash);
             }
 
@@ -2523,7 +2859,7 @@ namespace Cangjie::Debugger {
             }
 
             // 限制最大读取大小以防止内存问题
-            const size_t MAX_READ_SIZE = 1024 * 1024; // 1MB
+            constexpr size_t MAX_READ_SIZE = 1024 * 1024; // 1MB
             if (size_to_read > MAX_READ_SIZE) {
                 LOG_ERROR(
                     "Requested read size too large: " + std::to_string(size_to_read) + " > " + std::to_string(
@@ -2579,7 +2915,7 @@ namespace Cangjie::Debugger {
         return tcp_client_.SendProtoMessage(response);
     }
 
-  
+
     bool DebuggerClient::HandleWriteMemoryRequest(const lldbprotobuf::WriteMemoryRequest &req,
                                                   const std::optional<uint64_t> hash) const {
         LOG_INFO("Handling WriteMemory request: address=0x" + std::to_string(req.address()) +
@@ -2640,7 +2976,7 @@ namespace Cangjie::Debugger {
     }
 
     bool DebuggerClient::HandleDisassembleRequest(const lldbprotobuf::DisassembleRequest &req,
-                                                 const std::optional<uint64_t> hash) const {
+                                                  const std::optional<uint64_t> hash) const {
         LOG_INFO("Handling Disassemble request: start_address=0x" + std::to_string(req.start_address()) +
             ", end_address=0x" + std::to_string(req.end_address()) +
             ", count=" + std::to_string(req.count()));
@@ -2666,7 +3002,7 @@ namespace Cangjie::Debugger {
             // 如果设置了count，则计算结束地址
             if (count > 0) {
                 // 估算每条指令的平均大小（默认为15字节，x86-64的最大指令长度）
-                const uint32_t AVG_INSTRUCTION_SIZE = 15;
+                constexpr uint32_t AVG_INSTRUCTION_SIZE = 15;
                 uint64_t estimated_size = static_cast<uint64_t>(count) * AVG_INSTRUCTION_SIZE;
 
                 // 如果没有设置结束地址或者根据count计算的距离更小，则使用估算的距离
@@ -2756,7 +3092,7 @@ namespace Cangjie::Debugger {
                                 std::stringstream hex_stream;
                                 for (size_t j = 0; j < machine_bytes_read; ++j) {
                                     hex_stream << std::hex << std::setw(2) << std::setfill('0')
-                                              << static_cast<int>(machine_code[j]);
+                                            << static_cast<int>(machine_code[j]);
                                 }
                                 proto_instruction.set_machine_code(hex_stream.str());
                             }
@@ -2812,10 +3148,10 @@ namespace Cangjie::Debugger {
                 " instructions, " + std::to_string(bytes_disassembled) + " bytes");
 
             return SendDisassembleResponse(true, instructions, bytes_disassembled, "", hash);
-
         } catch (const std::exception &e) {
             LOG_ERROR("Exception during disassembly: " + std::string(e.what()));
-            return SendDisassembleResponse(false, {}, 0, "Exception during disassembly: " + std::string(e.what()), hash);
+            return SendDisassembleResponse(false, {}, 0, "Exception during disassembly: " + std::string(e.what()),
+                                           hash);
         } catch (...) {
             LOG_ERROR("Unknown exception during disassembly");
             return SendDisassembleResponse(false, {}, 0, "Unknown exception during disassembly", hash);
@@ -2823,10 +3159,10 @@ namespace Cangjie::Debugger {
     }
 
     bool DebuggerClient::SendDisassembleResponse(bool success,
-                                                const std::vector<lldbprotobuf::DisassembleInstruction>& instructions,
-                                                uint32_t bytes_disassembled,
-                                                const std::string& error_message,
-                                                const std::optional<uint64_t> hash) const {
+                                                 const std::vector<lldbprotobuf::DisassembleInstruction> &instructions,
+                                                 uint32_t bytes_disassembled,
+                                                 const std::string &error_message,
+                                                 const std::optional<uint64_t> hash) const {
         auto disassemble_resp = ProtoConverter::CreateDisassembleResponse(
             success,
             instructions,
@@ -2953,7 +3289,7 @@ namespace Cangjie::Debugger {
         return false;
     }
 
-    bool DebuggerClient::WaitForProcessTermination(int timeout_ms)   {
+    bool DebuggerClient::WaitForProcessTermination(int timeout_ms) {
         if (!process_.IsValid()) {
             LOG_INFO("Process is invalid, already terminated");
             return true;
@@ -2996,7 +3332,7 @@ namespace Cangjie::Debugger {
         }
     }
 
-    void DebuggerClient::EnsureProcessTerminated()   {
+    void DebuggerClient::EnsureProcessTerminated() {
         LOG_INFO("Ensuring process termination");
 
         if (!process_.IsValid()) {
@@ -3058,7 +3394,6 @@ namespace Cangjie::Debugger {
 
         LOG_WARNING("Process termination completed with potential issues");
     }
-
 } // namespace Cangjie::Debugger
 
 

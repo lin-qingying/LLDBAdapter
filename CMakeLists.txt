@@ -299,21 +299,9 @@ include_directories(${PROTOBUF_INCLUDE_DIRS})
 include(DownloadLLVM)
 download_llvm()
 
-# Check if we have LLVM source or should use dynamic linking
-if(DEFINED LLVM_INCLUDE_DIR AND DEFINED LLDB_INCLUDE_DIR)
-    message(STATUS "Using LLVM headers from: ${LLVM_INCLUDE_DIR}")
-    message(STATUS "Using LLDB headers from: ${LLDB_INCLUDE_DIR}")
-
-    # Add include directories for LLVM/LLDB headers
-    include_directories(${LLVM_INCLUDE_DIR})
-    include_directories(${LLDB_INCLUDE_DIR})
-
-    # We're using headers only, so we still need dynamic linking for libraries
-    add_compile_definitions(USE_DYNAMIC_LLDB)
-else()
-    message(STATUS "LLVM/LLDB headers not found, using dynamic linking mode")
-    add_compile_definitions(USE_DYNAMIC_LLDB)
-endif()
+# Add include directories for LLVM/LLDB headers
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/llvm-project/llvm/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/llvm-project/lldb/include)
 
 # Protobuf compilation
 set(PROTO_FILES
@@ -528,32 +516,19 @@ if(WIN32)
     )
 endif()
 
-# Platform-specific linking
-if(DEFINED LLVM_LIBRARIES AND DEFINED LLDB_LIBRARIES)
+# LLDB dynamic linking configuration
+if(WIN32)
     target_link_libraries(CangJieLLDBFrontend
-            ${LLVM_LIBRARIES}
-            ${LLDB_LIBRARIES}
-    )
-    target_include_directories(CangJieLLDBFrontend PRIVATE
-            ${LLVM_INCLUDE_DIRS}
-            ${LLDB_INCLUDE_DIRS}
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/liblldb.dll
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libclang.dll
+            psapi
+            ws2_32
+            wsock32
     )
 else()
-    target_compile_definitions(CangJieLLDBFrontend PRIVATE USE_DYNAMIC_LLDB)
-
-    if(WIN32)
-        target_link_libraries(CangJieLLDBFrontend
-                ${CMAKE_CURRENT_SOURCE_DIR}/third_party/liblldb.dll
-                ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libclang.dll
-                psapi
-                ws2_32
-                wsock32
-        )
-    else()
-        find_library(LLDB_LIB lldb)
-        if(LLDB_LIB)
-            target_link_libraries(CangJieLLDBFrontend ${LLDB_LIB})
-        endif()
+    find_library(LLDB_LIB lldb)
+    if(LLDB_LIB)
+        target_link_libraries(CangJieLLDBFrontend ${LLDB_LIB})
     endif()
 endif()
 

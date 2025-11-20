@@ -7,10 +7,6 @@
 #include "cangjie/debugger/ProtoConverter.h"
 
 
-#include "cangjie/debugger/Logger.h"
-#include "lldb/API/SBFrame.h"
-#include "lldb/API/SBLineEntry.h"
-#include "lldb/API/SBThread.h"
 
 namespace Cangjie {
     namespace Debugger {
@@ -106,9 +102,8 @@ namespace Cangjie {
                     lldbprotobuf::BreakpointStopInfo* breakpoint_info =
                         stop_info.mutable_breakpoint_info();
 
-                    // 从LLDB API获取断点ID和位置ID
+                    // 从LLDB API获取断点ID
                     uint64_t bp_id = sb_thread.GetStopReasonDataAtIndex(0);
-                    uint64_t bp_loc_id = sb_thread.GetStopReasonDataAtIndex(1);
 
                     breakpoint_info->set_breakpoint_id(bp_id);
 
@@ -178,7 +173,7 @@ namespace Cangjie {
                         if (target.IsValid()) {
                             lldb::SBWatchpoint wp = target.FindWatchpointByID(wp_id);
                             if (wp.IsValid()) {
-                                // 获取观察点类型
+                               // 获取观察点类型
                                 uint32_t wp_type = wp.GetWatchSize();
                                 if (wp_type & 0x1) { // 写观察点
                                     watchpoint_info->set_watch_type(lldbprotobuf::WATCH_TYPE_WRITE);
@@ -186,8 +181,7 @@ namespace Cangjie {
                                     watchpoint_info->set_watch_type(lldbprotobuf::WATCH_TYPE_READ);
                                 } else { // 读写观察点
                                     watchpoint_info->set_watch_type(lldbprotobuf::WATCH_TYPE_READ_WRITE);
-                                }
-                            }
+                                }                            }
                         }
                     }
 
@@ -203,15 +197,13 @@ namespace Cangjie {
 
                     signal_info->set_signal_number(signal_num);
                     signal_info->set_signal_name(GetSignalName(signal_num));
-                    signal_info->set_is_fatal(IsFatalSignal(signal_num));
-                    signal_info->set_source("lldb"); // 信号源，可以通过LLDB配置获取
 
                     break;
                 }
 
                 case lldb::eStopReasonException: {
                     lldbprotobuf::ExceptionStopInfo* exception_info =
-                        stop_info.mutable_exception_info();
+                        stop_info.mutable_exception_stop_info();
 
                     // 从LLDB API获取异常信息
                     uint64_t exception_addr = sb_thread.GetStopReasonDataAtIndex(0);
@@ -221,34 +213,43 @@ namespace Cangjie {
                     exception_info->set_exception_address(exception_addr);
                     exception_info->set_message(description);
 
-                    // 尝试获取异常类型信息
+                    // 获取异常发生的源代码位置
                     lldb::SBFrame frame = sb_thread.GetFrameAtIndex(0);
                     if (frame.IsValid()) {
-                        lldb::SBThread thread = frame.GetThread();
-                        if (thread.IsValid()) {
-                            const char* exception_desc = thread.GetStopDescription();
-                            if (exception_desc && strlen(exception_desc) > 0) {
-                                std::string desc_str(exception_desc);
-                                // 根据描述推断异常类型
-                                if (desc_str.find("access") != std::string::npos ||
-                                    desc_str.find("violation") != std::string::npos) {
-                                    exception_info->set_exception_type("access_violation");
-                                    exception_info->set_exception_name("Access Violation");
-                                } else if (desc_str.find("division") != std::string::npos) {
-                                    exception_info->set_exception_type("arithmetic_exception");
-                                    exception_info->set_exception_name("Division Exception");
-                                } else if (desc_str.find("overflow") != std::string::npos) {
-                                    exception_info->set_exception_type("arithmetic_exception");
-                                    exception_info->set_exception_name("Overflow Exception");
-                                } else {
-                                    exception_info->set_exception_type("runtime_exception");
-                                    exception_info->set_exception_name("Runtime Exception");
-                                }
-                            } else {
-                                exception_info->set_exception_type("runtime_exception");
-                                exception_info->set_exception_name("Exception");
+                        lldb::SBLineEntry line_entry = frame.GetLineEntry();
+                        if (line_entry.IsValid()) {
+                            lldb::SBFileSpec file_spec = line_entry.GetFileSpec();
+                            if (file_spec.IsValid()) {
+                                char file_path[1024];
+                                file_spec.GetPath(file_path, sizeof(file_path));
+                                lldbprotobuf::SourceLocation* location = exception_info->mutable_location();
+                                location->set_file_path(file_path);
+                                location->set_line(line_entry.GetLine());
                             }
                         }
+                    }
+
+                    // 尝试获取异常类型信息 - 使用已有description变量
+                    if (!description.empty()) {
+                        std::string desc_str = description;
+                        // 根据描述推断异常类型
+                        if (desc_str.find("access") != std::string::npos ||
+                            desc_str.find("violation") != std::string::npos) {
+                            exception_info->set_exception_type("access_violation");
+                            exception_info->set_exception_name("Access Violation");
+                        } else if (desc_str.find("division") != std::string::npos) {
+                            exception_info->set_exception_type("arithmetic_exception");
+                            exception_info->set_exception_name("Division Exception");
+                        } else if (desc_str.find("overflow") != std::string::npos) {
+                            exception_info->set_exception_type("arithmetic_exception");
+                            exception_info->set_exception_name("Overflow Exception");
+                        } else {
+                            exception_info->set_exception_type("runtime_exception");
+                            exception_info->set_exception_name("Runtime Exception");
+                        }
+                    } else {
+                        exception_info->set_exception_type("runtime_exception");
+                        exception_info->set_exception_name("Exception");
                     }
 
                     break;
@@ -273,14 +274,13 @@ namespace Cangjie {
                             }
                         }
 
-                        // 根据指令地址判断单步类型
-                        uint64_t pc = frame.GetPC();
-                        uint64_t prev_pc = frame.GetPreviousPC();
-
-                        // 如果PC变化很小，可能是指令级单步
-                        if (pc - prev_pc <= 15) { // 一般指令长度小于15字节
+                        // 由于 GetPreviousPC() 不存在，我们根据单步数据来判断步进范围
+                        uint32_t step_data_count_for_range = sb_thread.GetStopReasonDataCount();
+                        if (step_data_count_for_range > 0) {
+                            // 如果有停止数据，认为是指令级单步
                             step_info->set_step_range(lldbprotobuf::STEP_RANGE_INSTRUCTION);
                         } else {
+                            // 否则认为是行级单步
                             step_info->set_step_range(lldbprotobuf::STEP_RANGE_LINE);
                         }
                     }
@@ -297,10 +297,10 @@ namespace Cangjie {
                         } else if (step_data == 3) {
                             step_info->set_step_type(lldbprotobuf::STEP_TYPE_OUT);
                         } else {
-                            step_info->set_step_type(lldbprotobuf::STEP_TYPE_INSTRUCTION);
+                            step_info->set_step_type(lldbprotobuf::STEP_TYPE_INTO);
                         }
                     } else {
-                        step_info->set_step_type(lldbprotobuf::STEP_TYPE_INSTRUCTION);
+                        step_info->set_step_type(lldbprotobuf::STEP_TYPE_INTO);
                     }
 
                     break;
@@ -352,8 +352,6 @@ namespace Cangjie {
                     exit_info->set_exit_code(exit_code);
 
                     // 获取线程信息
-                    lldb::pid_t pid = sb_thread.GetProcessID();
-                    lldb::tid_t tid = sb_thread.GetThreadID();
                     uint32_t index_id = sb_thread.GetIndexID();
 
                     // 判断是否为主线程（通常是索引为0的线程）
@@ -922,6 +920,73 @@ namespace Cangjie {
             return initialized;
         }
 
+        lldbprotobuf::ProcessOutput ProtoConverter::CreateProcessOutputEvent(
+            const std::string &text,
+            lldbprotobuf::OutputType output_type) {
+            lldbprotobuf::ProcessOutput event;
+            event.set_text(text);
+            event.set_output_type(output_type);
+            return event;
+        }
+
+        // 新增事件创建函数实现
+        lldbprotobuf::ModuleEvent ProtoConverter::CreateModuleLoadedEvent(const std::vector<lldbprotobuf::Module> &modules) {
+            lldbprotobuf::ModuleEvent event;
+            event.set_event_type(lldbprotobuf::MODULE_LOADED);
+            for (const auto &module : modules) {
+                *event.add_modules() = module;
+            }
+            return event;
+        }
+
+        lldbprotobuf::ModuleEvent ProtoConverter::CreateModuleUnloadedEvent(const std::vector<lldbprotobuf::Module> &modules) {
+            lldbprotobuf::ModuleEvent event;
+            event.set_event_type(lldbprotobuf::MODULE_UNLOADED);
+            for (const auto &module : modules) {
+                *event.add_modules() = module;
+            }
+            return event;
+        }
+
+        lldbprotobuf::BreakpointChangedEvent ProtoConverter::CreateBreakpointChangedEvent(
+            const lldbprotobuf::Breakpoint &breakpoint,
+            lldbprotobuf::BreakpointEventType change_type,
+            const std::string &description) {
+            lldbprotobuf::BreakpointChangedEvent event;
+            *event.mutable_breakpoint() = breakpoint;
+            event.set_change_type(change_type);
+            if (!description.empty()) {
+                event.set_description(description);
+            }
+            return event;
+        }
+
+        lldbprotobuf::ThreadStateChangedEvent ProtoConverter::CreateThreadStateChangedEvent(
+            const lldbprotobuf::Thread &thread,
+            lldbprotobuf::ThreadStateChangeType change_type,
+            const std::string &description) {
+            lldbprotobuf::ThreadStateChangedEvent event;
+            *event.mutable_thread() = thread;
+            event.set_change_type(change_type);
+            if (!description.empty()) {
+                event.set_description(description);
+            }
+            return event;
+        }
+
+        lldbprotobuf::SymbolsLoadedEvent ProtoConverter::CreateSymbolsLoadedEvent(
+            const lldbprotobuf::Module &module,
+            uint32_t symbol_count,
+            const std::string &symbol_file_path) {
+            lldbprotobuf::SymbolsLoadedEvent event;
+            *event.mutable_module() = module;
+            event.set_symbol_count(symbol_count);
+            if (!symbol_file_path.empty()) {
+                event.set_symbol_file_path(symbol_file_path);
+            }
+            return event;
+        }
+
         lldbprotobuf::ContinueResponse ProtoConverter::CreateContinueResponse(bool cond, const char *str) {
             lldbprotobuf::ContinueResponse continue_response;
             *continue_response.mutable_status() = CreateResponseStatus(cond, str);
@@ -1199,7 +1264,7 @@ namespace Cangjie {
 
         lldbprotobuf::EvaluateResponse ProtoConverter::CreateEvaluateResponse(
             bool success,
-            lldbprotobuf::Variable variable,
+            const lldbprotobuf::Variable &variable,
             const std::string &error_message) {
             lldbprotobuf::EvaluateResponse response;
 

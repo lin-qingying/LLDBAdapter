@@ -19,8 +19,7 @@ function(download_llvm)
     # Find git executable
     find_package(Git QUIET)
     if(NOT GIT_FOUND)
-        message(WARNING "Git not found. Cannot clone LLVM. Will use dynamic linking mode.")
-        set(USE_DYNAMIC_LLDB ON PARENT_SCOPE)
+        message(FATAL_ERROR "Git not found. Cannot clone LLVM. Git is required for this project.")
         return()
     endif()
 
@@ -40,16 +39,13 @@ function(download_llvm)
     )
 
     if(NOT GIT_CLONE_RESULT EQUAL 0)
-        message(WARNING "Failed to clone LLVM: ${GIT_CLONE_ERROR}")
-        message(WARNING "Will use dynamic linking mode instead.")
-        set(USE_DYNAMIC_LLDB ON PARENT_SCOPE)
+        message(FATAL_ERROR "Failed to clone LLVM: ${GIT_CLONE_ERROR}")
         return()
     endif()
 
     # Verify the clone was successful
     if(NOT EXISTS ${LLVM_DIR}/llvm/CMakeLists.txt)
-        message(WARNING "LLVM clone incomplete. Will use dynamic linking mode.")
-        set(USE_DYNAMIC_LLDB ON PARENT_SCOPE)
+        message(FATAL_ERROR "LLVM clone incomplete.")
         return()
     endif()
 

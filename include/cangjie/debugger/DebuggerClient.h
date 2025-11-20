@@ -26,9 +26,7 @@
 #include "BreakpointManager.h"
 
 
-#ifdef USE_DYNAMIC_LLDB
 #include <lldb/API/LLDB.h>
-#endif
 
 
 namespace Cangjie {
@@ -120,6 +118,27 @@ public:
      */
     bool SendProcessStoppedEvent(  lldb::SBThread& thread) const;
 
+    /**
+     * @brief 发送进程输出事件
+     */
+    bool SendProcessOutputEvent(const std::string& text, lldbprotobuf::OutputType output_type) const;
+
+    // 新增事件发送函数声明
+    bool SendModuleLoadedEvent(const std::vector<lldbprotobuf::Module>& modules) const;
+    bool SendModuleUnloadedEvent(const std::vector<lldbprotobuf::Module>& modules) const;
+    bool SendBreakpointChangedEvent(
+        const lldbprotobuf::Breakpoint& breakpoint,
+        lldbprotobuf::BreakpointEventType change_type,
+        const std::string& description = "") const;
+    bool SendThreadStateChangedEvent(
+        const lldbprotobuf::Thread& thread,
+        lldbprotobuf::ThreadStateChangeType change_type,
+        const std::string& description = "") const;
+    bool SendSymbolsLoadedEvent(
+        const lldbprotobuf::Module& module,
+        uint32_t symbol_count,
+        const std::string& symbol_file_path = "") const;
+
 
 
 
@@ -151,13 +170,11 @@ private:
     mutable std::unique_ptr<cangjie::debugger::BreakpointManager> breakpoint_manager_;
 
 
-#ifdef USE_DYNAMIC_LLDB
-    // LLDB debugger and target
+  // LLDB debugger and target
     mutable lldb::SBDebugger debugger_;
     mutable lldb::SBTarget target_;
     mutable lldb::SBProcess process_;
     mutable bool lldb_initialized_;
-#endif
 
     /**
      * @brief 初始化LLDB调试器（如果尚未初始化）
@@ -177,6 +194,10 @@ private:
     // Key: 变量ID (uint64_t，基于thread_id+frame_index+current_time的哈希)
     // Value: LLDB SBValue对象
     mutable std::unordered_map<uint64_t, lldb::SBValue> variable_id_map_;
+
+    // 模块跟踪 - 用于检测模块卸载
+    // Key: 模块UUID字符串, Value: 模块信息
+    mutable std::unordered_map<std::string, lldbprotobuf::Module> tracked_modules_;
 
     /**
      * @brief 启动事件监听线程
@@ -288,6 +309,13 @@ private:
      * @brief 打印已加载模块信息
      */
     static void LogLoadedModules(const lldb::SBEvent& event) ;
+
+    /**
+     * @brief 转换LLDB断点事件类型到协议类型
+     * @param lldb_type LLDB断点事件类型
+     * @return 协议断点事件类型
+     */
+    lldbprotobuf::BreakpointEventType ConvertBreakpointEventType(lldb::BreakpointEventType lldb_type) const;
 
 
 
