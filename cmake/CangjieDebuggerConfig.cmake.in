@@ -1,0 +1,16 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find required dependencies
+find_dependency(Protobuf REQUIRED)
+
+# Include targets
+include("${CMAKE_CURRENT_LIST_DIR}/CangjieDebuggerTargets.cmake")
+
+# Check that all required components are available
+check_required_components(CangjieDebugger)
+
+# Set variables for compatibility
+set(CangjieDebugger_VERSION @PROJECT_VERSION@)
+set(CangjieDebugger_FOUND TRUE)

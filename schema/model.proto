@@ -1,0 +1,621 @@
+syntax = "proto3";
+
+package lldbprotobuf;
+
+/*
+ * ========================================================================
+ * LLDB 定制调试协议（Proto3）
+ *
+ * 设计目标：
+ *  - 以 LLDB 的核心对象（SBDebugger / SBTarget / SBProcess /
+ *    SBThread / SBFrame / SBValue / SBBreakpoint / SBLaunchInfo）为建模基础；
+ *  - 删除 VSCode DAP 中大量 UI/IDE 相关字段，仅保留 LLDB 能力；
+ *  - 使用稳定的 uint64 Id 引用调试对象（target/process/thread/value/breakpoint）；
+ *  - 完全适用于 gRPC，可作为自定义语言（例如仓颉）调试器后端协议。
+ *
+ * 说明：每个 message / enum / field 均带中文注释，并在必要处标注对应的
+ * LLDB API（以便实现端将 protocol message 映射到 LLDB 的 SB* 接口）。
+ * ========================================================================
+ */
+
+/* =========================================================================
+ * 环境变量（EnvironmentVariable）
+ * ========================================================================= */
+
+// 环境变量：键值对形式。对应 LLDB API：SBLaunchInfo::SetEnvironmentEntries / GetEnvironmentEntries
+message EnvironmentVariable {
+  // 环境变量名称，例如 "PATH"。
+  string name = 1;
+
+  // 环境变量值，例如 "/usr/bin:/bin"。
+  string value = 2;
+}
+
+
+/* =========================================================================
+ * 通用 Id / 状态
+ * ========================================================================= */
+
+// 通用 Id：协议使用无符号 64 位稳定 Id 映射到后端的 SB* 对象
+message Id {
+  // 唯一标识符（由后端分配并保持稳定）
+  int64  id = 1;
+}
+
+// 通用返回状态：语义与 LLDB 的 SBError 相近
+message Status {
+  // 操作是否成功
+  bool success = 1;
+
+  // 失败或附带说明文本（成功时一般为空）
+  string message = 2;
+}
+
+
+
+
+
+/* =========================================================================
+ * 控制台模式（ConsoleMode）
+ * ========================================================================= */
+
+// 控制台/终端的配置方式。对应 LLDB 的 SBLaunchInfo::SetPTY / Launch flags
+enum ConsoleMode {
+  // 使用调试器父进程（或 IDE）提供的控制台（默认）。
+  CONSOLE_MODE_PARENT = 0;
+
+  // 在独立外部终端窗口中启动被调试程序（系统终端）。
+  CONSOLE_MODE_EXTERNAL = 1;
+
+  // 使用伪终端（PTY），适合需要完整终端行为的程序（如 curses）。
+  CONSOLE_MODE_PSEUDO = 2;
+}
+
+
+
+
+/* =========================================================================
+ * 进程 / 线程 / 栈帧
+ * ========================================================================= */
+
+// 进程信息：对应 SBProcess 的基本属性（GetProcessID / GetState / GetExitStatus）
+message ProcessInfo {
+  // 协议层进程 Id（后端应映射到 SBProcess）
+  Id process_id = 1;
+
+  // 若进程已退出则返回退出码（对应 SBProcess::GetExitStatus）
+  int32 exit_code = 2;
+
+  // 进程是否仍然存活（对应 SBProcess::IsAlive 或 SBProcess::GetState）
+  bool alive = 3;
+}
+/**
+ * 停止原因
+ *
+ * 描述线程或进程为什么进入暂停状态
+ */
+enum StopReason {
+  // 无效/未知原因
+  STOP_REASON_INVALID = 0;
+  // 无停止原因（未暂停）
+  STOP_REASON_NONE = 1;
+  // 单步跟踪（trace）
+  STOP_REASON_TRACE = 2;
+  // 命中断点
+  STOP_REASON_BREAKPOINT = 3;
+  // 命中观察点（数据断点）
+  STOP_REASON_WATCHPOINT = 4;
+  // 收到信号（如 SIGINT、SIGSEGV）
+  STOP_REASON_SIGNAL = 5;
+  // 发生异常
+  STOP_REASON_EXCEPTION = 6;
+  // exec 系统调用（进程替换）
+  STOP_REASON_EXEC = 7;
+  // 进程分支创建
+  STOP_REASON_FORK = 8;
+  // vfork 系统调用
+  STOP_REASON_VFORK = 9;
+  // vfork 完成
+  STOP_REASON_VFORK_DONE = 10;
+  // 执行计划完成（如单步执行完成）
+  STOP_REASON_PLAN_COMPLETE = 11;
+  // 线程即将退出
+  STOP_REASON_THREAD_EXITING = 12;
+  // 工具化事件
+  STOP_REASON_INSTRUMENTATION = 13;
+  // 未知原因
+  STOP_REASON_UNKNOWN = 14;
+}
+/**
+ * 线程停止信息
+ *
+ * 描述线程为什么暂停以及暂停时的详细状态
+ */
+message ThreadStopInfo {
+  // 停止原因
+  StopReason reason = 1;
+  // 停止原因的文本描述
+  string description = 2;
+
+  // 特定停止原因的详细信息
+  oneof stop_details {
+    // 断点信息
+    BreakpointStopInfo breakpoint_info = 3;
+    // 观察点信息
+    WatchpointStopInfo watchpoint_info = 4;
+    // 信号信息
+    SignalStopInfo signal_info = 5;
+    // 异常信息
+    ExceptionStopInfo exception_info = 6;
+    // 单步信息
+    StepStopInfo step_info = 7;
+    // 线程退出信息
+    ThreadExitStopInfo thread_exit_info = 8;
+    // 工具化事件信息
+    InstrumentationStopInfo instrumentation_info = 9;
+    // 执行完成信息
+    PlanCompleteStopInfo plan_complete_info = 10;
+  }
+}
+
+// 断点停止信息
+message BreakpointStopInfo {
+  // 断点ID
+  uint64 breakpoint_id = 1;
+  // 断点类型
+  BreakpointType type = 2;
+  // 断点地址
+  uint64 address = 3;
+  // 命中次数
+  uint32 hit_count = 4;
+  // 条件表达式（如果有）
+  string condition = 5;
+}
+
+// 观察点停止信息
+message WatchpointStopInfo {
+  // 观察点ID
+  uint64 watchpoint_id = 1;
+  // 观察类型（读/写/读写）
+  WatchType watch_type = 2;
+  // 被观察的内存地址
+  uint64 address = 3;
+  // 访问大小（字节数）
+  uint32 size = 4;
+  // 旧值
+  Value old_value = 5;
+  // 新值
+  Value new_value = 6;
+}
+
+// 信号停止信息
+message SignalStopInfo {
+  // 信号编号
+  int32 signal_number = 1;
+  // 信号名称（如 "SIGSEGV"、"SIGINT"）
+  string signal_name = 2;
+  // 是否为致命信号
+  bool is_fatal = 3;
+  // 信号来源（如 "keyboard"、"system"）
+  string source = 4;
+}
+
+// 异常停止信息
+message ExceptionStopInfo {
+  // 异常代码
+  int32 exception_code = 1;
+  // 异常名称
+  string exception_name = 2;
+  // 异常发生地址
+  uint64 exception_address = 3;
+  // 异常类型（如 "access_violation"、"divide_by_zero"）
+  string exception_type = 4;
+  // 异常描述
+  string message = 5;
+}
+
+// 单步停止信息
+message StepStopInfo {
+  // 单步类型（over/into/out）
+  StepType step_type = 1;
+  // 单步范围（instruction/line/statement）
+  StepRange step_range = 2;
+  // 源代码位置
+  SourceLocation location = 3;
+  // 是否完成函数调用
+  bool finished_function_call = 4;
+}
+
+// 线程退出停止信息
+message ThreadExitStopInfo {
+  // 线程退出码
+  int32 exit_code = 1;
+  // 退出原因描述
+  string exit_reason = 2;
+  // 是否为主线程
+  bool is_main_thread = 3;
+}
+
+// 工具化事件停止信息
+message InstrumentationStopInfo {
+  // 事件类型
+  string event_type = 1;
+  // 事件数据
+  string event_data = 2;
+  // 工具名称
+  string tool_name = 3;
+  // 事件ID
+  uint64 event_id = 4;
+}
+
+// 执行计划完成停止信息
+message PlanCompleteStopInfo {
+  // 计划类型
+  string plan_type = 1;
+  // 完成状态
+  CompletionStatus status = 2;
+  // 结果描述
+  string result_description = 3;
+  // 执行的步骤数
+  uint32 steps_executed = 4;
+}
+// 线程信息：对应 SBThread 的 Name / IndexID / ThreadID / StopReason 等
+message Thread {
+  // 线程索引（从 0 开始的序号）
+  uint32 index = 6;
+  // 线程 Id（协议层唯一标识，可映射到 SBThread::GetThreadID 或 GetIndexID）
+  Id thread_id = 1;
+
+  // 操作系统线程 ID（若可获取，例如 pthread_t 或 Windows THREADID）
+  uint64 os_thread_id = 2;
+
+  // 线程名称（SBThread::GetName）
+  string name = 3;
+  // 停止信息（如果线程已暂停）
+  ThreadStopInfo stop_info = 5;
+  // 是否冻结
+  bool is_frozen = 4;
+
+
+}
+
+// 多个栈帧集合
+
+message Frames{
+
+
+  //  栈帧数量
+  uint32 total_frames = 1;
+
+  // 栈帧列表
+  repeated Frame frames = 2;
+
+
+}
+// 栈帧信息：对应 SBFrame（GetFunctionName/GetModule/GetLineEntry/GetPC）
+message Frame {
+  // 帧在协议层的唯一 Id（便于后续引用，如 Evaluate）
+  Id id = 1;
+  uint32 index = 6;
+
+  // 函数名（SBFrame::GetFunctionName 或 GetSymbol）
+  string function_name = 2;
+
+  // 模块名，例如二进制或库名（SBFrame::GetModule().GetFileSpec().GetFilename()）
+  string module = 3;
+  // 程序计数器（指令地址）
+  uint64 program_counter = 5;
+  // 源代码位置
+  SourceLocation location = 4;
+
+  // 是否允许重启该栈帧（如果后端 / 平台支持 restart frame）
+  bool can_restart = 8;
+}
+
+
+/**
+ * 进程启动信息
+ *
+ * 包含启动进程所需的完整配置信息
+ */
+message ProcessLaunchInfo {
+  // 可执行文件的绝对路径
+  string executable_path = 1;
+
+  repeated string argv = 2;
+
+  // 启动时的环境变量列表（对应 SBLaunchInfo::SetEnvironmentEntries）
+  repeated EnvironmentVariable env = 3;
+
+  // 工作目录（对应 SBLaunchInfo::GetWorkingDirectory / SetWorkingDirectory）
+  string working_directory = 4;
+
+  // 标准输入重定向路径（SBLaunchInfo::SetStandardInputPath）
+  string stdin_path = 5;
+
+  // 标准输出重定向路径（SBLaunchInfo::SetStandardOutputPath）
+  string stdout_path = 6;
+
+  // 标准错误重定向路径（SBLaunchInfo::SetStandardErrorPath）
+  string stderr_path = 7;
+
+}
+
+
+/* =========================================================================
+ * 断点 / Watchpoint
+ * ========================================================================= */
+
+// 断点位置（对应 SBBreakpointLocation / address）
+message BreakpointLocation {
+  // 位置 Id（映射到 SBBreakpointLocation 或协议层生成的 Id）
+  Id id = 1;
+
+  // 内存地址（虚拟地址）
+  uint64 address = 2;
+
+  // 是否已解析（符号地址是否被解析）
+  bool is_resolved = 3;
+
+  // 源代码位置（如果可用）
+  SourceLocation location = 4;
+
+  // 所属模块路径
+  string module_path = 5;
+}
+
+// 哈希算法，用于源文件完整性校验（可选）
+enum HashAlgorithm {
+  HASH_ALGORITHM_NONE = 0;
+  HASH_ALGORITHM_MD5 = 1;
+  HASH_ALGORITHM_SHA1 = 2;
+  HASH_ALGORITHM_SHA256 = 3;
+}
+
+message Hash {
+  // 使用的哈希算法
+  HashAlgorithm hash_algorithm = 3;
+
+  // 哈希值（十六进制字符串）
+  string hash_value = 4;
+}
+
+// 精确的源代码位置
+message SourceLocation {
+  // 源文件路径（相对于项目根或绝对路径）
+  string file_path = 1;
+
+  // 行号（从 1 开始）
+  uint32 line = 2;
+
+  // 可选的文件哈希，用于检测源文件是否被修改（与上面的 Hash 一致）
+  Hash hash = 3;
+}
+
+// 断点对象（用户设置）
+message Breakpoint {
+  // 断点 Id（协议层，映射到 SBBreakpoint）
+  Id id = 1;
+
+  // 用户原始设置位置
+  SourceLocation original_location = 2;
+
+  // 条件表达式（若为空表示无条件断点）
+  string condition = 3;
+}
+enum TypeKind {
+  TYPE_INVALID = 0;
+
+  TYPE_ARRAY = 1;
+  TYPE_BLOCK_POINTER = 2;
+  TYPE_BUILTIN = 3;
+  TYPE_CLASS = 4;
+  TYPE_COMPLEX_FLOAT = 5;
+  TYPE_COMPLEX_INT = 6;
+  TYPE_ENUM = 7;
+  TYPE_FUNCTION = 8;
+  TYPE_MEMBER_POINTER = 9;
+  TYPE_OBJC_OBJECT = 10;
+  TYPE_OBJC_INTERFACE = 11;
+  TYPE_OBJC_OBJECT_POINTER = 12;
+  TYPE_POINTER = 13;
+  TYPE_REFERENCE = 14;
+  TYPE_STRUCT = 15;
+  TYPE_TYPEDEF = 16;
+  TYPE_UNION = 17;
+  TYPE_VECTOR = 18;
+  TYPE_OTHER = 19;
+  TYPE_ANY = 20;
+}
+enum ValueKind {
+  VALUE_INVALID = 0;
+
+  VALUE_GLOBAL = 1;
+  VALUE_STATIC = 2;
+  VALUE_ARGUMENT = 3;
+  VALUE_LOCAL = 4;
+
+  VALUE_REGISTER = 5;
+  VALUE_REGISTER_SET = 6;
+
+  VALUE_CONST_RESULT = 7;
+
+  VALUE_THREAD_LOCAL = 8;
+}
+message Type{
+  // 类型名称（如 "int", "std::string"）
+  string type_name = 3;
+  // 用于显示的类型名称（可能经过简化或美化）
+  string display_type = 6;
+  // 类型分类
+  TypeKind type_kind = 4;
+}
+
+/**
+ * 反汇编选项
+ */
+message DisassembleOptions {
+  // 是否显示机器码
+  bool show_machine_code = 1;
+
+  // 是否显示地址
+  bool show_addresses = 2;
+
+  // 是否显示字节偏移
+  bool show_byte_offsets = 3;
+
+  // 反汇编 flavor（att, intel）
+  string flavor = 4;
+
+  // 是否使用符号化地址
+  bool symbolize_addresses = 5;
+}
+message HashId{
+  uint64 hash = 1;
+}
+/**
+ * 反汇编指令
+ *
+ * 表示一条汇编指令的完整信息。
+ */
+message DisassembleInstruction {
+  // 指令地址（虚拟地址）
+  uint64 address = 1;
+
+  // 指令的机器码（十六进制字符串）
+  string machine_code = 2;
+
+  // 汇编指令文本
+  string instruction = 3;
+
+  // 指令的注释说明
+  string comment = 4;
+
+  // 指令长度（字节数）
+  uint32 size = 5;
+
+  // 对应的源代码位置（如果可用）
+  SourceLocation source_location = 6;
+
+  // 符号信息（如果地址对应符号）
+  string symbol = 7;
+}
+// 变量信息：对应 SBValue 的一组属性（GetName/GetTypeName/GetValue/GetAddress/MightHaveChildren）
+message Variable {
+  // 变量 Id（协议层，映射到 SBValue）
+  Id id = 1;
+
+  // 变量名
+  string name = 2;
+
+  Type type = 6;
+  // 内存地址（如果有）
+  uint64 address = 5;
+
+
+  ValueKind value_kind = 7;
+
+  // 是否有子变量（对应 SBValue::MightHaveChildren()）
+  bool has_children = 8;
+
+}
+
+
+
+// 表示变量的值
+message Value {
+  // 属于的变量id
+  Id variable_id = 1;
+
+  // 值的字符串表示（对应 SBValue::GetValue()）
+  string value = 2;
+
+  // 值的摘要（对应 SBValue::GetSummary()，适用于复杂对象）
+  string summary = 3;
+
+
+
+  // 值是否发生了变化（对应 SBValue::GetValueDidChange()）
+  bool value_did_change = 5;
+
+  // 错误信息（对应 SBValue::GetError()）
+  string error = 6;
+
+
+}
+
+
+
+
+enum OutputType{
+  //    value {
+  //  name: "OutputTypeStdout"
+  //  number: 0
+  //}
+  //value {
+  //  name: "OutputTypeStderr"
+  //  number: 1
+  //}
+  OutputTypeStdout = 0;
+  OutputTypeStderr = 1;
+}
+
+// 动态值类型选项
+// 对应 LLDB 的 DynamicValueType 枚举
+enum DynamicValueType {
+  // 无动态值 (eNoDynamicValues)
+  DYNAMIC_VALUE_NONE = 0;
+
+  // 动态值但不运行目标 (eDynamicDontRunTarget)
+  DYNAMIC_VALUE_DONT_RUN_TARGET = 1;
+
+  // 运行目标获取动态值 (eDynamicRunTarget)
+  DYNAMIC_VALUE_RUN_TARGET = 2;
+}
+
+/* =========================================================================
+ * 停止详情相关枚举
+ * ========================================================================= */
+
+// 断点类型
+enum BreakpointType {
+  BREAKPOINT_TYPE_UNKNOWN = 0;
+  BREAKPOINT_TYPE_LINE = 1;      // 行断点
+  BREAKPOINT_TYPE_ADDRESS = 2;   // 地址断点
+  BREAKPOINT_TYPE_FUNCTION = 3;  // 函数断点
+  BREAKPOINT_TYPE_CONDITIONAL = 4; // 条件断点
+  BREAKPOINT_TYPE_EXCEPTION = 5;  // 异常断点
+}
+
+// 观察点类型
+enum WatchType {
+  WATCH_TYPE_UNKNOWN = 0;
+  WATCH_TYPE_READ = 1;      // 读观察点
+  WATCH_TYPE_WRITE = 2;     // 写观察点
+  WATCH_TYPE_READ_WRITE = 3; // 读写观察点
+}
+
+// 单步类型
+enum StepType {
+  STEP_TYPE_UNKNOWN = 0;
+  STEP_TYPE_OVER = 1;  // 单步跳过
+  STEP_TYPE_INTO = 2;  // 单步进入
+  STEP_TYPE_OUT = 3;   // 单步跳出
+}
+
+// 单步范围
+enum StepRange {
+  STEP_RANGE_UNKNOWN = 0;
+  STEP_RANGE_INSTRUCTION = 1; // 指令级别
+  STEP_RANGE_LINE = 2;        // 行级别
+  STEP_RANGE_STATEMENT = 3;   // 语句级别
+}
+
+// 完成状态
+enum CompletionStatus {
+  COMPLETION_STATUS_UNKNOWN = 0;
+  COMPLETION_STATUS_SUCCESS = 1;    // 成功完成
+  COMPLETION_STATUS_FAILED = 2;      // 失败
+  COMPLETION_STATUS_INTERRUPTED = 3; // 被中断
+  COMPLETION_STATUS_TIMEOUT = 4;     // 超时
+}

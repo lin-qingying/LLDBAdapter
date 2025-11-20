@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package lldbprotobuf;
+import "model.proto";
+
+
+
+/* =========================================================================
+ * 调试事件（Event）—— 服务端异步推送到客户端
+ * ========================================================================= */
+
+
+
+message Initialized {
+  // 可选说明文本，例如 "Debugger initialized"
+  uint64 capabilities = 3;
+}
+/**
+ * 进程中断事件
+ *
+ * 当被调试进程因断点、单步、信号等原因暂停执行时发送。
+ * 这是最重要的事件之一，前端需要据此更新所有调试视图。
+ */
+message ProcessStopped  {
+  // 停止的线程（触发暂停的线程）
+  Thread stopped_thread = 1;
+  // 当前栈帧（被中断线程的顶层栈帧）
+  Frame current_frame = 2;
+}
+
+/**
+ * 进程运行事件
+ *
+ * 当进程从暂停状态恢复执行时发送（如执行 continue、step 命令后）。
+ */
+message ProcessRunning  {
+  Id thread = 2;
+}
+
+message ProcessExited {
+  int32 exit_code = 2;
+
+  // 退出描述（可选，如"被信号终止"）
+  optional string exit_description = 3;}
+
+
+
+
+message  ProcessOutput {
+
+  string text = 1;
+  OutputType output_type = 2;
+}
+
+
+
+/* =========================================================================
+ * 服务端事件（调试后端异步 → 客户端）
+ * =========================================================================
+ */
+message Event {
+  // 每种事件都是单独的结构
+  oneof body {
+    Initialized initialized = 1;
+
+    // 进程生命周期相关
+    ProcessStopped process_stopped = 2;
+    ProcessRunning  process_running = 3;
+    ProcessExited process_exited = 4;
+
+    // 控制台输出
+    ProcessOutput process_output = 7;
+
+
+  }
+}
+
