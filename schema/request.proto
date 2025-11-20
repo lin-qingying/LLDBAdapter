@@ -152,9 +152,29 @@ message VariablesRequest {
 
   // 是否包含已识别的参数（类型推断的参数）
   bool include_recognized_arguments = 9;
+}
 
-  // 是否获取寄存器
-  bool include_registers = 10;
+/**
+ * 寄存器查询请求
+ *
+ * 获取指定线程和栈帧的寄存器信息
+ */
+message RegistersRequest {
+  // 目标线程 ID
+  Id thread_id = 1;
+
+  // 栈帧索引
+  uint32 frame_index = 2;
+
+  // 寄存器组过滤（例如："general", "floating_point", "vector", "special"）
+  // 如果为空，则返回所有寄存器组
+  repeated string register_groups = 3;
+
+  // 是否包含寄存器值的详细信息（例如：对于向量寄存器是否包含每个元素）
+  bool include_detailed_values = 4;
+
+  // 寄存器名称过滤（如果指定，只返回这些名称的寄存器）
+  repeated string register_names = 5;
 }
 
 // 请求变量值
@@ -356,6 +376,7 @@ message Request {
     ThreadsRequest threads = 5;
     FramesRequest frames = 6;
     VariablesRequest variables = 10;
+    RegistersRequest registers = 28;
 
     AddBreakpointRequest add_breakpoint = 7;
     RemoveBreakpointRequest remove_breakpoint = 8;

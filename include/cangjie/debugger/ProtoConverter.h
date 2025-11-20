@@ -349,6 +349,34 @@ namespace Cangjie {
                 uint32_t bytes_disassembled = 0,
                 const std::string &error_message = "");
 
+            // ========================================================================
+            // 寄存器转换
+            // ========================================================================
+
+            /**
+             * @brief 创建寄存器信息
+             */
+            static lldbprotobuf::Register CreateRegister(lldb::SBValue &sb_value, uint64_t register_id);
+
+            /**
+             * @brief 创建寄存器组信息
+             */
+            static lldbprotobuf::RegisterGroup CreateRegisterGroup(
+                const std::string &name,
+                const std::string &description,
+                uint32_t register_count,
+                bool visible = true);
+
+            /**
+             * @brief 创建寄存器响应
+             */
+            static lldbprotobuf::RegistersResponse CreateRegistersResponse(
+                bool success,
+                const std::vector<lldbprotobuf::Register> &registers = {},
+                const std::vector<lldbprotobuf::RegisterGroup> &register_groups = {},
+                bool include_detailed_values = false,
+                const std::string &error_message = "");
+
             static lldbprotobuf::AddBreakpointResponse CreateAddBreakpointResponse(
                 bool success,
                 BreakpointType breakpoint_type,

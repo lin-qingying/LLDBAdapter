@@ -11,6 +11,24 @@ message VariablesResponse {
   repeated Variable variables = 1;
 }
 
+/**
+ * 寄存器查询响应
+ *
+ * 返回指定线程和栈帧的寄存器信息
+ */
+message RegistersResponse {
+  Status status = 1;
+
+  // 寄存器列表
+  repeated Register registers = 2;
+
+  // 寄存器组信息（可选，提供寄存器组的元数据）
+  repeated RegisterGroup register_groups = 3;
+
+  // 响应选项（反映请求中的选项）
+  bool include_detailed_values = 4;
+}
+
 // 获取变量值响应
 message GetValueResponse {
   Status status = 1;
@@ -259,6 +277,7 @@ message Response {
     RemoveBreakpointResponse remove_breakpoint = 9;
 
     VariablesResponse variables = 12;
+    RegistersResponse registers = 30;
     GetValueResponse get_value = 27;
     SetVariableValueResponse set_variable_value = 29;
     VariablesChildrenResponse get_variables_children = 28;

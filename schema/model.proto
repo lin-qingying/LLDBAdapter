@@ -481,8 +481,8 @@ message DisassembleInstruction {
   // 指令地址（虚拟地址）
   uint64 address = 1;
 
-  // 指令的机器码（十六进制字符串）
-  string machine_code = 2;
+  // 指令的机器码（十六进制）
+  bytes machine_code = 2;
 
   // 汇编指令文本
   string instruction = 3;
@@ -541,6 +541,62 @@ message Value {
   string error = 6;
 
 
+}
+
+/**
+ * 寄存器信息
+ *
+ * 表示单个寄存器的状态和值，对应 LLDB 的 SBValue 对象
+ */
+message Register {
+  // 寄存器 Id（协议层，映射到 SBValue）
+  Id id = 1;
+
+  // 寄存器名称（例如："rax", "rbx", "xmm0"）
+  string name = 2;
+
+  // 寄存器值（十六进制字符串或十进制字符串）
+  string value = 3;
+
+  // 寄存器值的摘要（对于大寄存器提供摘要）
+  string summary = 4;
+
+  // 寄存器类型
+  Type type = 5;
+
+  // 寄存器集合（例如："general", "floating_point", "vector", "special"）
+  string register_set = 6;
+
+  // 是否是硬件寄存器
+  bool is_hardware = 7;
+
+  // 寄存器大小（字节数）
+  uint32 size = 8;
+
+  // 是否有子元素（对于向量寄存器等）
+  bool has_children = 9;
+
+  // 更新标志（值是否在最后一步后发生变化）
+  bool value_did_change = 10;
+}
+
+/**
+ * 寄存器组信息
+ *
+ * 提供寄存器组的元数据信息
+ */
+message RegisterGroup {
+  // 组名称（例如："general", "floating_point", "vector", "special"）
+  string name = 1;
+
+  // 组描述
+  string description = 2;
+
+  // 该组中的寄存器数量
+  uint32 register_count = 3;
+
+  // 是否可见
+  bool visible = 4;
 }
 
 

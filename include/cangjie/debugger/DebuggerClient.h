@@ -82,6 +82,7 @@ public:
     bool SendReadMemoryResponse(bool success, uint64_t address, const std::string& data, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
     bool SendWriteMemoryResponse(bool success, uint32_t bytes_written, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
     bool SendDisassembleResponse(bool success, const std::vector<lldbprotobuf::DisassembleInstruction>& instructions, uint32_t bytes_disassembled, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
+    bool SendRegistersResponse(bool success, const std::vector<lldbprotobuf::Register>& registers = {}, const std::vector<lldbprotobuf::RegisterGroup>& register_groups = {}, bool include_detailed_values = false, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
 
 
 
@@ -358,6 +359,7 @@ private:
     // ============================================================================
     // Request Handlers - Registers
     // ============================================================================
+    bool HandleRegistersRequest(const lldbprotobuf::RegistersRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
 
 
 

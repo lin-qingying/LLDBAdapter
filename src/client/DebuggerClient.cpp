@@ -466,6 +466,9 @@ namespace Cangjie::Debugger {
         if (request.has_variables()) {
             return HandleVariablesRequest(request.variables(), request.hash());
         }
+        if (request.has_registers()) {
+            return HandleRegistersRequest(request.registers(), request.hash());
+        }
 
         // Expression Evaluation and Variables
         if (request.has_get_value()) {
@@ -1491,8 +1494,7 @@ namespace Cangjie::Debugger {
             ", in_scope_only=" + std::to_string(req.in_scope_only()) +
             ", include_runtime_support_values=" + std::to_string(req.include_runtime_support_values()) +
             ", use_dynamic=" + std::to_string(static_cast<int>(req.use_dynamic())) +
-            ", include_recognized_arguments=" + std::to_string(req.include_recognized_arguments()) +
-            ", include_registers=" + std::to_string(req.include_registers()));
+            ", include_recognized_arguments=" + std::to_string(req.include_recognized_arguments()));
 
         // 验证进程是否有效
         if (!process_.IsValid()) {
@@ -1607,39 +1609,168 @@ namespace Cangjie::Debugger {
             }
         }
 
-        // 尝试获取寄存器变量（如果请求且寄存器上下文有效）
-        if (req.include_registers() && target_frame.GetRegisters().IsValid()) {
-            lldb::SBValueList reg_vars = target_frame.GetRegisters();
-            LOG_INFO(
-                "Found " + std::to_string(reg_vars.GetSize()) + " registers in frame " + std::to_string(req.frame_index(
-                )));
+  
+        LOG_INFO(
+            "Successfully extracted " + std::to_string(variables.size()) +
+            " variables (including arguments and locals)");
+        return SendVariablesResponse(true, variables, "", hash);
+    }
 
-            for (uint32_t i = 0; i < reg_vars.GetSize(); ++i) {
-                lldb::SBValue reg_value = reg_vars.GetValueAtIndex(i);
-                if (!reg_value.IsValid()) {
-                    continue;
-                }
+    bool DebuggerClient::HandleRegistersRequest(const lldbprotobuf::RegistersRequest &req,
+                                               const std::optional<uint64_t> hash) const {
+        LOG_INFO("Handling Registers request: thread_id=" + std::to_string(req.thread_id().id()) +
+            ", frame_index=" + std::to_string(req.frame_index()) +
+            ", include_detailed_values=" + std::to_string(req.include_detailed_values()));
 
-                try {
-                    uint64_t variable_id = AllocateVariableId(req.thread_id().id(), req.frame_index(), reg_value);
+        // 验证进程是否有效
+        if (!process_.IsValid()) {
+            LOG_ERROR("No valid process available");
+            return SendRegistersResponse(false, {}, {}, false, "No valid process available", hash);
+        }
 
-                    lldbprotobuf::Variable proto_var = ProtoConverter::CreateVariable(reg_value, variable_id);
+        // 查找指定的线程
+        lldb::SBThread target_thread;
+        uint32_t num_threads = process_.GetNumThreads();
+        bool thread_found = false;
 
-                    variables.push_back(proto_var);
-
-                    LOG_INFO("  Register: " + std::string(reg_value.GetName() ? reg_value.GetName() : "unnamed") +
-                        " = " + std::string(reg_value.GetValue() ? reg_value.GetValue() : "<no value>"));
-                } catch (const std::exception &e) {
-                    LOG_WARNING("Failed to convert register at index " + std::to_string(i) + ": " + e.what());
-                    // 继续处理其他寄存器，不要因为一个失败而中断
-                }
+        for (uint32_t i = 0; i < num_threads; ++i) {
+            lldb::SBThread sb_thread = process_.GetThreadAtIndex(i);
+            if (sb_thread.IsValid() && sb_thread.GetThreadID() == req.thread_id().id()) {
+                target_thread = sb_thread;
+                thread_found = true;
+                break;
             }
         }
 
-        LOG_INFO(
-            "Successfully extracted " + std::to_string(variables.size()) +
-            " variables (including arguments and registers)");
-        return SendVariablesResponse(true, variables, "", hash);
+        if (!thread_found) {
+            LOG_ERROR("Thread not found: " + std::to_string(req.thread_id().id()));
+            return SendRegistersResponse(false, {}, {}, false, "Thread not found", hash);
+        }
+
+        // 获取指定的栈帧
+        uint32_t num_frames = target_thread.GetNumFrames();
+
+        if (req.frame_index() >= num_frames) {
+            LOG_ERROR(
+                "Frame index out of range: " + std::to_string(req.frame_index()) + " >= " + std::to_string(num_frames));
+            return SendRegistersResponse(false, {}, {}, false, "Frame index out of range", hash);
+        }
+
+        lldb::SBFrame target_frame = target_thread.GetFrameAtIndex(req.frame_index());
+        if (!target_frame.IsValid()) {
+            LOG_ERROR("Invalid frame at index " + std::to_string(req.frame_index()));
+            return SendRegistersResponse(false, {}, {}, false, "Invalid frame", hash);
+        }
+
+        // 获取寄存器上下文
+        lldb::SBValueList reg_vars = target_frame.GetRegisters();
+        if (!reg_vars.IsValid()) {
+            LOG_ERROR("Failed to get register context for frame " + std::to_string(req.frame_index()));
+            return SendRegistersResponse(false, {}, {}, false, "Failed to get register context", hash);
+        }
+
+        std::vector<lldbprotobuf::Register> registers;
+        std::vector<lldbprotobuf::RegisterGroup> register_groups;
+
+        LOG_INFO("Found " + std::to_string(reg_vars.GetSize()) + " registers in frame " + std::to_string(req.frame_index()));
+
+        // 处理寄存器组过滤
+        std::set<std::string> requested_groups;
+        for (const std::string& group : req.register_groups()) {
+            requested_groups.insert(group);
+        }
+
+        // 处理寄存器名称过滤
+        std::set<std::string> requested_names;
+        for (const std::string& name : req.register_names()) {
+            requested_names.insert(name);
+        }
+
+        // 转换寄存器
+        for (uint32_t i = 0; i < reg_vars.GetSize(); ++i) {
+            lldb::SBValue reg_value = reg_vars.GetValueAtIndex(i);
+            if (!reg_value.IsValid()) {
+                continue;
+            }
+
+            const char* reg_name = reg_value.GetName();
+            if (!reg_name) {
+                continue;
+            }
+
+            // 检查寄存器名称过滤
+            if (!requested_names.empty() && requested_names.find(reg_name) == requested_names.end()) {
+                continue;
+            }
+
+            // 检查寄存器组过滤
+            const char* reg_set_name = reg_value.GetValueForExpressionPath(".register-set").GetValue();
+            std::string register_set = reg_set_name ? reg_set_name : "general";
+
+            if (!requested_groups.empty() && requested_groups.find(register_set) == requested_groups.end()) {
+                continue;
+            }
+
+            try {
+                // 分配寄存器ID
+                uint64_t register_id = AllocateVariableId(req.thread_id().id(), req.frame_index(), reg_value);
+
+                // 创建寄存器protobuf对象
+                lldbprotobuf::Register proto_register = ProtoConverter::CreateRegister(reg_value, register_id);
+
+                // 设置寄存器组信息
+                proto_register.set_register_set(register_set);
+
+                registers.push_back(proto_register);
+
+                LOG_INFO("  Register: " + std::string(reg_name) +
+                    " (group: " + register_set + ") = " +
+                    std::string(reg_value.GetValue() ? reg_value.GetValue() : "<no value>"));
+            } catch (const std::exception &e) {
+                LOG_WARNING("Failed to convert register at index " + std::to_string(i) + ": " + e.what());
+                // 继续处理其他寄存器，不要因为一个失败而中断
+            }
+        }
+
+        // 创建寄存器组信息
+        std::map<std::string, std::vector<uint32_t>> group_map;
+        for (uint32_t i = 0; i < registers.size(); ++i) {
+            const std::string& group_name = registers[i].register_set();
+            group_map[group_name].push_back(i);
+        }
+
+        for (const auto& group_pair : group_map) {
+            lldbprotobuf::RegisterGroup group;
+            group.set_name(group_pair.first);
+            group.set_description("Register group: " + group_pair.first);
+            group.set_register_count(group_pair.second.size());
+            group.set_visible(true);
+            register_groups.push_back(group);
+        }
+
+        LOG_INFO("Successfully extracted " + std::to_string(registers.size()) +
+                " registers from " + std::to_string(register_groups.size()) + " groups");
+        return SendRegistersResponse(true, registers, register_groups, req.include_detailed_values(), "", hash);
+    }
+
+    bool DebuggerClient::SendRegistersResponse(bool success,
+                                              const std::vector<lldbprotobuf::Register> &registers,
+                                              const std::vector<lldbprotobuf::RegisterGroup> &register_groups,
+                                              bool include_detailed_values,
+                                              const std::string &error_message,
+                                              const std::optional<uint64_t> hash) const {
+        auto registers_resp = ProtoConverter::CreateRegistersResponse(success, registers, register_groups,
+                                                                    include_detailed_values, error_message);
+
+        lldbprotobuf::Response response;
+        if (hash.has_value()) {
+            *response.mutable_hash() = CreateHashId(hash.value());
+        }
+        *response.mutable_registers() = registers_resp;
+
+        LOG_INFO("Sending Registers response: success=" + std::to_string(success) +
+                ", register_count=" + std::to_string(registers.size()));
+        return tcp_client_.SendProtoMessage(response);
     }
 
     // ============================================================================
@@ -3088,13 +3219,8 @@ namespace Cangjie::Debugger {
                             size_t machine_bytes_read = data.ReadRawData(read_error, 0, machine_code.data(), data_size);
 
                             if (read_error.Success() && machine_bytes_read > 0) {
-                                // 转换为十六进制字符串
-                                std::stringstream hex_stream;
-                                for (size_t j = 0; j < machine_bytes_read; ++j) {
-                                    hex_stream << std::hex << std::setw(2) << std::setfill('0')
-                                            << static_cast<int>(machine_code[j]);
-                                }
-                                proto_instruction.set_machine_code(hex_stream.str());
+                                // 直接设置原始机器码二进制数据
+                                proto_instruction.set_machine_code(machine_code.data(), machine_bytes_read);
                             }
                         }
                     }

@@ -1327,5 +1327,184 @@ namespace Cangjie {
 
             return response;
         }
+
+        // ============================================================================
+        // 寄存器转换
+        // ============================================================================
+
+        lldbprotobuf::Register ProtoConverter::CreateRegister(lldb::SBValue &sb_value, uint64_t register_id) {
+            lldbprotobuf::Register reg;
+
+            // 设置寄存器ID
+            reg.mutable_id()->set_id(register_id);
+
+            // 设置寄存器名称
+            if (const char *name = sb_value.GetName()) {
+                reg.set_name(name);
+            } else {
+                reg.set_name("<unnamed_register>");
+            }
+
+            // 设置寄存器值
+            if (const char *value = sb_value.GetValue()) {
+                reg.set_value(value);
+            } else {
+                reg.set_value("0x0");
+            }
+
+            // 设置寄存器摘要（对于大寄存器提供摘要）
+            if (const char *summary = sb_value.GetSummary()) {
+                reg.set_summary(summary);
+            } else {
+                // 如果没有摘要，尝试使用值作为摘要
+                if (const char *value = sb_value.GetValue()) {
+                    reg.set_summary(value);
+                }
+            }
+
+            // 安全地设置寄存器类型
+            try {
+                lldb::SBType sb_type = sb_value.GetType();
+                if (sb_type.IsValid()) {
+                    *reg.mutable_type() = CreateType(sb_type);
+                } else {
+                    // 为寄存器创建默认类型
+                    *reg.mutable_type() = CreateType("register", lldbprotobuf::TYPE_BUILTIN, "register");
+                }
+            } catch (...) {
+                *reg.mutable_type() = CreateType("register", lldbprotobuf::TYPE_BUILTIN, "register");
+            }
+
+            // 获取寄存器集合名称
+            // 寄存器集合通常通过寄存器名称的前缀来判断
+            std::string reg_name = reg.name();
+            if (reg_name.find("rax") != std::string::npos ||
+                reg_name.find("rbx") != std::string::npos ||
+                reg_name.find("rcx") != std::string::npos ||
+                reg_name.find("rdx") != std::string::npos ||
+                reg_name.find("rsi") != std::string::npos ||
+                reg_name.find("rdi") != std::string::npos ||
+                reg_name.find("rbp") != std::string::npos ||
+                reg_name.find("rsp") != std::string::npos ||
+                reg_name.find("r8") != std::string::npos ||
+                reg_name.find("r9") != std::string::npos ||
+                reg_name.find("r10") != std::string::npos ||
+                reg_name.find("r11") != std::string::npos ||
+                reg_name.find("r12") != std::string::npos ||
+                reg_name.find("r13") != std::string::npos ||
+                reg_name.find("r14") != std::string::npos ||
+                reg_name.find("r15") != std::string::npos) {
+                reg.set_register_set("general");
+            } else if (reg_name.find("xmm") != std::string::npos ||
+                      reg_name.find("ymm") != std::string::npos ||
+                      reg_name.find("zmm") != std::string::npos) {
+                reg.set_register_set("floating_point");
+            } else if (reg_name.find("cs") != std::string::npos ||
+                      reg_name.find("ds") != std::string::npos ||
+                      reg_name.find("es") != std::string::npos ||
+                      reg_name.find("fs") != std::string::npos ||
+                      reg_name.find("gs") != std::string::npos ||
+                      reg_name.find("ss") != std::string::npos) {
+                reg.set_register_set("special");
+            } else if (reg_name.find("st") != std::string::npos) {
+                reg.set_register_set("floating_point");
+            } else if (reg_name.find("mm") != std::string::npos) {
+                reg.set_register_set("vector");
+            } else {
+                reg.set_register_set("general");
+            }
+
+            // 设置是否为硬件寄存器
+            // 在LLDB中，寄存器通常是硬件寄存器
+            reg.set_is_hardware(true);
+
+            // 设置寄存器大小
+            try {
+                reg.set_size(sb_value.GetByteSize());
+            } catch (...) {
+                // 如果获取大小失败，根据寄存器名称推断
+                if (reg_name.find("r") == 0 && reg_name.length() >= 2 && reg_name.length() <= 3) {
+                    // 64位通用寄存器 (rax, rbx, etc.)
+                    reg.set_size(8);
+                } else if (reg_name.find("e") == 0 && reg_name.length() >= 2 && reg_name.length() <= 3) {
+                    // 32位寄存器 (eax, ebx, etc.)
+                    reg.set_size(4);
+                } else if (reg_name.find("xmm") == 0) {
+                    // XMM寄存器 (128位)
+                    reg.set_size(16);
+                } else if (reg_name.find("ymm") == 0) {
+                    // YMM寄存器 (256位)
+                    reg.set_size(32);
+                } else if (reg_name.find("zmm") == 0) {
+                    // ZMM寄存器 (512位)
+                    reg.set_size(64);
+                } else {
+                    reg.set_size(8); // 默认8字节
+                }
+            }
+
+            // 设置是否有子元素（对于向量寄存器等）
+            try {
+                reg.set_has_children(sb_value.MightHaveChildren());
+            } catch (...) {
+                // 向量寄存器（如XMM, YMM, ZMM）通常有子元素
+                if (reg_name.find("xmm") == 0 || reg_name.find("ymm") == 0 || reg_name.find("zmm") == 0) {
+                    reg.set_has_children(true);
+                } else {
+                    reg.set_has_children(false);
+                }
+            }
+
+            // 设置更新标志
+            try {
+                reg.set_value_did_change(sb_value.GetValueDidChange());
+            } catch (...) {
+                reg.set_value_did_change(false);
+            }
+
+            return reg;
+        }
+
+        lldbprotobuf::RegisterGroup ProtoConverter::CreateRegisterGroup(
+            const std::string &name,
+            const std::string &description,
+            uint32_t register_count,
+            bool visible) {
+            lldbprotobuf::RegisterGroup group;
+
+            group.set_name(name);
+            group.set_description(description);
+            group.set_register_count(register_count);
+            group.set_visible(visible);
+
+            return group;
+        }
+
+        lldbprotobuf::RegistersResponse ProtoConverter::CreateRegistersResponse(
+            bool success,
+            const std::vector<lldbprotobuf::Register> &registers,
+            const std::vector<lldbprotobuf::RegisterGroup> &register_groups,
+            bool include_detailed_values,
+            const std::string &error_message) {
+            lldbprotobuf::RegistersResponse response;
+
+            *response.mutable_status() = CreateResponseStatus(success, error_message);
+
+            if (success) {
+                // 添加所有寄存器
+                for (const auto &reg : registers) {
+                    *response.add_registers() = reg;
+                }
+
+                // 添加所有寄存器组
+                for (const auto &group : register_groups) {
+                    *response.add_register_groups() = group;
+                }
+
+                response.set_include_detailed_values(include_detailed_values);
+            }
+
+            return response;
+        }
     } // namespace Debugger
 } // namespace Cangjie
