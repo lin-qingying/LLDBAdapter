@@ -81,8 +81,10 @@ public:
 
     bool SendReadMemoryResponse(bool success, uint64_t address, const std::string& data, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
     bool SendWriteMemoryResponse(bool success, uint32_t bytes_written, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
-    bool SendDisassembleResponse(bool success, const std::vector<lldbprotobuf::DisassembleInstruction>& instructions, uint32_t bytes_disassembled, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
-    bool SendRegistersResponse(bool success, const std::vector<lldbprotobuf::Register>& registers = {}, const std::vector<lldbprotobuf::RegisterGroup>& register_groups = {}, bool include_detailed_values = false, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
+    bool SendDisassembleResponse(bool success, const std::vector<lldbprotobuf::DisassembleInstruction>& instructions, uint32_t bytes_disassembled, bool alignment_verified, uint64_t actual_end_address, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
+    bool SendGetFunctionInfoResponse(bool success, const std::vector<lldbprotobuf::FunctionInfo>& functions, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
+    bool SendRegistersResponse(bool success, const std::vector<lldbprotobuf::Register>& registers = {}, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
+    bool SendRegisterGroupsResponse(bool success, const std::vector<lldbprotobuf::RegisterGroup>& register_groups = {}, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
 
 
 
@@ -355,11 +357,13 @@ private:
     // ============================================================================
     // Request Handlers - Memory and Disassembly
     // ============================================================================
+    bool HandleGetFunctionInfoRequest(const lldbprotobuf::GetFunctionInfoRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
 
     // ============================================================================
     // Request Handlers - Registers
     // ============================================================================
     bool HandleRegistersRequest(const lldbprotobuf::RegistersRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
+    bool HandleRegisterGroupsRequest(const lldbprotobuf::RegisterGroupsRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
 
 
 

@@ -51,16 +51,29 @@ cmake --build . --target regenerate_protoids
 cmake --build . --target rebuild_protobuf
 ```
 
-### Testing
+### Running the Debugger
+```bash
+# The main executable requires a port number for TCP communication
+./output/CangJieLLDBFrontend 8080
+
+# Example: Start debugger frontend listening on port 8080
+output/CangJieLLDBFrontend.exe 8080  # Windows
+./output/CangJieLLDBFrontend 8080     # Linux/macOS
+```
+
+### Testing (Planned)
 ```bash
 cd build
-ctest  # or run tests directly
+ctest  # Run all tests (when test files are implemented)
+
+# Individual test components (planned):
 ./tests/test_protocol_handler
 ./tests/test_logger
 ./tests/test_tcp_client
 ./tests/test_breakpoint_manager
 ./tests/test_proto_converter
 ```
+**Note**: Test infrastructure is planned but not yet implemented.
 
 ### Clean Build
 ```bash
@@ -150,11 +163,12 @@ The debugger uses LLDB's C++ API with dynamic loading patterns:
 
 ### Critical Build Dependencies
 
-- **C++20**: Required standard (CMake sets this)
+- **C++20**: Required standard with some C++17 components (CMake sets this)
 - **LLVM/LLDB**: Uses headers from `third_party/llvm-project/` or dynamic linking
 - **Protocol Buffers**: Built from source in `third_party/protobuf/` with automatic dependency resolution
 - **Threading**: Uses `std::thread` and C++ synchronization primitives
 - **CMake 3.16.5+**: For modern CMake features and presets
+- **Platform Libraries**: Windows requires dbghelp, psapi, wsock32, ws2_32
 
 ### Cross-Platform Considerations
 
@@ -219,14 +233,16 @@ The debugger uses LLDB's C++ API with dynamic loading patterns:
 
 ### Testing Strategy
 
-**Unit Tests** (`tests/`):
+**Current Status**: Test infrastructure is planned but not yet implemented. The `tests/` directory exists but contains no test files.
+
+**Planned Unit Tests** (`tests/`):
 - `test_protocol_handler.cpp`: Protocol Buffers communication tests
 - `test_logger.cpp`: Logging system functionality
 - `test_tcp_client.cpp`: Network communication tests
 - `test_breakpoint_manager.cpp`: Breakpoint management tests
 - `test_proto_converter.cpp`: Protocol conversion tests
 
-Run with: `cmake --build . && ctest` or individual test execution.
+**When implemented**, run with: `cmake --build . && ctest` or individual test execution.
 
 ### Performance Considerations
 

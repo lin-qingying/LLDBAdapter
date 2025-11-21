@@ -347,6 +347,34 @@ namespace Cangjie {
                 bool success,
                 const std::vector<lldbprotobuf::DisassembleInstruction> &instructions = {},
                 uint32_t bytes_disassembled = 0,
+                bool alignment_verified = false,
+                uint64_t actual_end_address = 0,
+                const std::string &error_message = "");
+
+            // ========================================================================
+            // 函数信息转换
+            // ========================================================================
+
+            /**
+             * @brief 从 LLDB 函数对象创建函数信息
+             */
+            static lldbprotobuf::FunctionInfo CreateFunctionInfo(
+                  lldb::SBFunction &function,
+                const lldb::SBTarget &target);
+
+            /**
+             * @brief 从 LLDB 符号对象创建函数信息
+             */
+            static lldbprotobuf::FunctionInfo CreateFunctionInfoFromSymbol(
+                  lldb::SBSymbol &symbol,
+                const lldb::SBTarget &target);
+
+            /**
+             * @brief 创建函数信息查询响应
+             */
+            static lldbprotobuf::GetFunctionInfoResponse CreateGetFunctionInfoResponse(
+                bool success,
+                const std::vector<lldbprotobuf::FunctionInfo> &functions = {},
                 const std::string &error_message = "");
 
             // ========================================================================
@@ -356,16 +384,14 @@ namespace Cangjie {
             /**
              * @brief 创建寄存器信息
              */
-            static lldbprotobuf::Register CreateRegister(lldb::SBValue &sb_value, uint64_t register_id);
+            static lldbprotobuf::Register CreateRegister(lldb::SBValue &sb_value);
 
             /**
              * @brief 创建寄存器组信息
              */
             static lldbprotobuf::RegisterGroup CreateRegisterGroup(
                 const std::string &name,
-                const std::string &description,
-                uint32_t register_count,
-                bool visible = true);
+                uint32_t register_count);
 
             /**
              * @brief 创建寄存器响应
@@ -373,8 +399,14 @@ namespace Cangjie {
             static lldbprotobuf::RegistersResponse CreateRegistersResponse(
                 bool success,
                 const std::vector<lldbprotobuf::Register> &registers = {},
+                const std::string &error_message = "");
+
+            /**
+             * @brief 创建寄存器组响应
+             */
+            static lldbprotobuf::RegisterGroupsResponse CreateRegisterGroupsResponse(
+                bool success,
                 const std::vector<lldbprotobuf::RegisterGroup> &register_groups = {},
-                bool include_detailed_values = false,
                 const std::string &error_message = "");
 
             static lldbprotobuf::AddBreakpointResponse CreateAddBreakpointResponse(

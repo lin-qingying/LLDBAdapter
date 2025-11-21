@@ -469,6 +469,9 @@ namespace Cangjie::Debugger {
         if (request.has_registers()) {
             return HandleRegistersRequest(request.registers(), request.hash());
         }
+        if (request.has_register_groups()) {
+            return HandleRegisterGroupsRequest(request.register_groups(), request.hash());
+        }
 
         // Expression Evaluation and Variables
         if (request.has_get_value()) {
@@ -499,6 +502,10 @@ namespace Cangjie::Debugger {
 
         if (request.has_disassemble()) {
             return HandleDisassembleRequest(request.disassemble(), request.hash());
+        }
+
+        if (request.has_get_function_info()) {
+            return HandleGetFunctionInfoRequest(request.get_function_info(), request.hash());
         }
 
         // Signal Handling
@@ -1620,12 +1627,12 @@ namespace Cangjie::Debugger {
                                                const std::optional<uint64_t> hash) const {
         LOG_INFO("Handling Registers request: thread_id=" + std::to_string(req.thread_id().id()) +
             ", frame_index=" + std::to_string(req.frame_index()) +
-            ", include_detailed_values=" + std::to_string(req.include_detailed_values()));
+            ", expand_children=" + std::to_string(req.expand_children()));
 
         // 验证进程是否有效
         if (!process_.IsValid()) {
             LOG_ERROR("No valid process available");
-            return SendRegistersResponse(false, {}, {}, false, "No valid process available", hash);
+            return SendRegistersResponse(false, {}, "No valid process available", hash);
         }
 
         // 查找指定的线程
@@ -1644,7 +1651,7 @@ namespace Cangjie::Debugger {
 
         if (!thread_found) {
             LOG_ERROR("Thread not found: " + std::to_string(req.thread_id().id()));
-            return SendRegistersResponse(false, {}, {}, false, "Thread not found", hash);
+            return SendRegistersResponse(false, {}, "Thread not found", hash);
         }
 
         // 获取指定的栈帧
@@ -1653,30 +1660,29 @@ namespace Cangjie::Debugger {
         if (req.frame_index() >= num_frames) {
             LOG_ERROR(
                 "Frame index out of range: " + std::to_string(req.frame_index()) + " >= " + std::to_string(num_frames));
-            return SendRegistersResponse(false, {}, {}, false, "Frame index out of range", hash);
+            return SendRegistersResponse(false, {}, "Frame index out of range", hash);
         }
 
         lldb::SBFrame target_frame = target_thread.GetFrameAtIndex(req.frame_index());
         if (!target_frame.IsValid()) {
             LOG_ERROR("Invalid frame at index " + std::to_string(req.frame_index()));
-            return SendRegistersResponse(false, {}, {}, false, "Invalid frame", hash);
+            return SendRegistersResponse(false, {}, "Invalid frame", hash);
         }
 
         // 获取寄存器上下文
         lldb::SBValueList reg_vars = target_frame.GetRegisters();
         if (!reg_vars.IsValid()) {
             LOG_ERROR("Failed to get register context for frame " + std::to_string(req.frame_index()));
-            return SendRegistersResponse(false, {}, {}, false, "Failed to get register context", hash);
+            return SendRegistersResponse(false, {}, "Failed to get register context", hash);
         }
 
         std::vector<lldbprotobuf::Register> registers;
-        std::vector<lldbprotobuf::RegisterGroup> register_groups;
 
         LOG_INFO("Found " + std::to_string(reg_vars.GetSize()) + " registers in frame " + std::to_string(req.frame_index()));
 
         // 处理寄存器组过滤
         std::set<std::string> requested_groups;
-        for (const std::string& group : req.register_groups()) {
+        for (const std::string& group : req.group_names()) {
             requested_groups.insert(group);
         }
 
@@ -1704,27 +1710,42 @@ namespace Cangjie::Debugger {
             }
 
             // 检查寄存器组过滤
-            const char* reg_set_name = reg_value.GetValueForExpressionPath(".register-set").GetValue();
-            std::string register_set = reg_set_name ? reg_set_name : "general";
+            std::string register_group = reg_value.GetValueForExpressionPath(".register-set").GetValue();
+            if (register_group.empty()) {
+                register_group = "general";
+            }
 
-            if (!requested_groups.empty() && requested_groups.find(register_set) == requested_groups.end()) {
+            if (!requested_groups.empty() && requested_groups.find(register_group) == requested_groups.end()) {
                 continue;
             }
 
             try {
-                // 分配寄存器ID
-                uint64_t register_id = AllocateVariableId(req.thread_id().id(), req.frame_index(), reg_value);
-
                 // 创建寄存器protobuf对象
-                lldbprotobuf::Register proto_register = ProtoConverter::CreateRegister(reg_value, register_id);
+                lldbprotobuf::Register proto_register = ProtoConverter::CreateRegister(reg_value);
 
                 // 设置寄存器组信息
-                proto_register.set_register_set(register_set);
+                proto_register.set_group_name(register_group);
+
+                // 处理子寄存器（仅当 expand_children=true 且有子元素时填充）
+                if (req.expand_children() && reg_value.GetNumChildren() > 0) {
+                    // 清空子元素列表，然后重新填充
+                    proto_register.clear_children();
+
+                    // 处理子寄存器（如向量寄存器的子元素）
+                    for (uint32_t child_idx = 0; child_idx < reg_value.GetNumChildren(); ++child_idx) {
+                        lldb::SBValue child_reg = reg_value.GetChildAtIndex(child_idx);
+                        if (child_reg.IsValid()) {
+                            lldbprotobuf::Register child_proto_register = ProtoConverter::CreateRegister(child_reg);
+                            child_proto_register.set_group_name(register_group);
+                            proto_register.add_children()->CopyFrom(child_proto_register);
+                        }
+                    }
+                }
 
                 registers.push_back(proto_register);
 
                 LOG_INFO("  Register: " + std::string(reg_name) +
-                    " (group: " + register_set + ") = " +
+                    " (group: " + register_group + ") = " +
                     std::string(reg_value.GetValue() ? reg_value.GetValue() : "<no value>"));
             } catch (const std::exception &e) {
                 LOG_WARNING("Failed to convert register at index " + std::to_string(i) + ": " + e.what());
@@ -1732,35 +1753,15 @@ namespace Cangjie::Debugger {
             }
         }
 
-        // 创建寄存器组信息
-        std::map<std::string, std::vector<uint32_t>> group_map;
-        for (uint32_t i = 0; i < registers.size(); ++i) {
-            const std::string& group_name = registers[i].register_set();
-            group_map[group_name].push_back(i);
-        }
-
-        for (const auto& group_pair : group_map) {
-            lldbprotobuf::RegisterGroup group;
-            group.set_name(group_pair.first);
-            group.set_description("Register group: " + group_pair.first);
-            group.set_register_count(group_pair.second.size());
-            group.set_visible(true);
-            register_groups.push_back(group);
-        }
-
-        LOG_INFO("Successfully extracted " + std::to_string(registers.size()) +
-                " registers from " + std::to_string(register_groups.size()) + " groups");
-        return SendRegistersResponse(true, registers, register_groups, req.include_detailed_values(), "", hash);
+        LOG_INFO("Successfully extracted " + std::to_string(registers.size()) + " registers");
+        return SendRegistersResponse(true, registers, "", hash);
     }
 
     bool DebuggerClient::SendRegistersResponse(bool success,
                                               const std::vector<lldbprotobuf::Register> &registers,
-                                              const std::vector<lldbprotobuf::RegisterGroup> &register_groups,
-                                              bool include_detailed_values,
                                               const std::string &error_message,
                                               const std::optional<uint64_t> hash) const {
-        auto registers_resp = ProtoConverter::CreateRegistersResponse(success, registers, register_groups,
-                                                                    include_detailed_values, error_message);
+        auto registers_resp = ProtoConverter::CreateRegistersResponse(success, registers, error_message);
 
         lldbprotobuf::Response response;
         if (hash.has_value()) {
@@ -1770,6 +1771,89 @@ namespace Cangjie::Debugger {
 
         LOG_INFO("Sending Registers response: success=" + std::to_string(success) +
                 ", register_count=" + std::to_string(registers.size()));
+        return tcp_client_.SendProtoMessage(response);
+    }
+
+    bool DebuggerClient::HandleRegisterGroupsRequest(const lldbprotobuf::RegisterGroupsRequest &req,
+                                                   const std::optional<uint64_t> hash) const {
+        LOG_INFO("Handling RegisterGroups request: thread_id=" +
+                (req.has_thread_id() ? std::to_string(req.thread_id().id()) : "current") +
+                ", frame_index=" + std::to_string(req.frame_index()));
+
+        // 验证进程是否有效
+        if (!process_.IsValid()) {
+            LOG_ERROR("No valid process available");
+            return SendRegisterGroupsResponse(false, {}, "No valid process available", hash);
+        }
+
+        // 如果指定了线程ID，验证线程是否存在
+        if (req.has_thread_id()) {
+            bool thread_found = false;
+            uint32_t num_threads = process_.GetNumThreads();
+
+            for (uint32_t i = 0; i < num_threads; ++i) {
+                lldb::SBThread sb_thread = process_.GetThreadAtIndex(i);
+                if (sb_thread.IsValid() && sb_thread.GetThreadID() == req.thread_id().id()) {
+                    thread_found = true;
+                    break;
+                }
+            }
+
+            if (!thread_found) {
+                LOG_ERROR("Thread not found: " + std::to_string(req.thread_id().id()));
+                return SendRegisterGroupsResponse(false, {}, "Thread not found", hash);
+            }
+        }
+
+        // 获取寄存器组信息
+        std::vector<lldbprotobuf::RegisterGroup> register_groups;
+
+        // 这里我们可以从当前进程/线程/帧中获取寄存器组信息
+        // 由于LLDB没有直接的方法获取所有寄存器组，我们可以使用预定义的常见寄存器组
+        if (target_.IsValid()) {
+            // 通用寄存器组
+            lldbprotobuf::RegisterGroup general_group;
+            general_group.set_name("general");
+            general_group.set_register_count(16);  // 估算的数量
+            register_groups.push_back(general_group);
+
+            // 浮点寄存器组
+            lldbprotobuf::RegisterGroup fp_group;
+            fp_group.set_name("floating_point");
+            fp_group.set_register_count(16);  // 估算的数量
+            register_groups.push_back(fp_group);
+
+            // 向量寄存器组
+            lldbprotobuf::RegisterGroup vector_group;
+            vector_group.set_name("vector");
+            vector_group.set_register_count(32);  // 估算的数量
+            register_groups.push_back(vector_group);
+
+            // 系统寄存器组
+            lldbprotobuf::RegisterGroup system_group;
+            system_group.set_name("system");
+            system_group.set_register_count(8);  // 估算的数量
+            register_groups.push_back(system_group);
+        }
+
+        LOG_INFO("Successfully extracted " + std::to_string(register_groups.size()) + " register groups");
+        return SendRegisterGroupsResponse(true, register_groups, "", hash);
+    }
+
+    bool DebuggerClient::SendRegisterGroupsResponse(bool success,
+                                                     const std::vector<lldbprotobuf::RegisterGroup> &register_groups,
+                                                     const std::string &error_message,
+                                                     const std::optional<uint64_t> hash) const {
+        auto register_groups_resp = ProtoConverter::CreateRegisterGroupsResponse(success, register_groups, error_message);
+
+        lldbprotobuf::Response response;
+        if (hash.has_value()) {
+            *response.mutable_hash() = CreateHashId(hash.value());
+        }
+        *response.mutable_register_groups() = register_groups_resp;
+
+        LOG_INFO("Sending RegisterGroups response: success=" + std::to_string(success) +
+                ", group_count=" + std::to_string(register_groups.size()));
         return tcp_client_.SendProtoMessage(response);
     }
 
@@ -3108,27 +3192,81 @@ namespace Cangjie::Debugger {
 
     bool DebuggerClient::HandleDisassembleRequest(const lldbprotobuf::DisassembleRequest &req,
                                                   const std::optional<uint64_t> hash) const {
-        LOG_INFO("Handling Disassemble request: start_address=0x" + std::to_string(req.start_address()) +
-            ", end_address=0x" + std::to_string(req.end_address()) +
-            ", count=" + std::to_string(req.count()));
-
         // 验证进程是否有效
         if (!process_.IsValid()) {
             LOG_ERROR("No valid process available for disassembly");
-            return SendDisassembleResponse(false, {}, 0, "No valid process available", hash);
+            return SendDisassembleResponse(false, {}, 0, false, 0, "No valid process available", hash);
         }
 
         // 验证目标是否有效
         if (!target_.IsValid()) {
             LOG_ERROR("No valid target available for disassembly");
-            return SendDisassembleResponse(false, {}, 0, "No valid target available", hash);
+            return SendDisassembleResponse(false, {}, 0, false, 0, "No valid target available", hash);
         }
 
         try {
-            // 计算反汇编的范围
-            uint64_t start_address = req.start_address();
-            uint64_t end_address = req.end_address();
-            uint32_t count = req.count();
+            // 根据不同的模式解析反汇编参数
+            uint64_t start_address = 0;
+            uint64_t end_address = 0;
+            uint32_t count = 0;
+            std::string mode_type = "unknown";
+
+            // 检查使用的是哪种模式
+            switch (req.mode_case()) {
+                case lldbprotobuf::DisassembleRequest::kRange: {
+                    // 模式1：地址范围（向前反汇编）
+                    const auto& range = req.range();
+                    start_address = range.start_address();
+                    end_address = range.end_address();
+                    mode_type = "range";
+                    LOG_INFO("Disassemble request (range mode): start_address=0x" +
+                        std::to_string(start_address) + ", end_address=0x" + std::to_string(end_address));
+                    break;
+                }
+                case lldbprotobuf::DisassembleRequest::kCount: {
+                    // 模式2：从起始地址向前反汇编指定数量的指令
+                    const auto& count_mode = req.count();
+                    start_address = count_mode.start_address();
+                    count = count_mode.instruction_count();
+                    mode_type = "count";
+                    LOG_INFO("Disassemble request (count mode): start_address=0x" +
+                        std::to_string(start_address) + ", count=" + std::to_string(count));
+                    break;
+                }
+                case lldbprotobuf::DisassembleRequest::kAnchor: {
+                    // 模式3：以锚点为中心，按指令数量向前向后反汇编
+                    const auto& anchor = req.anchor();
+                    uint64_t anchor_address = anchor.anchor_address();
+                    uint32_t backward_count = anchor.backward_count();
+                    uint32_t forward_count = anchor.forward_count();
+
+                    // 估算地址范围（粗略估算）
+                    constexpr uint32_t AVG_INSTRUCTION_SIZE = 8;
+                    start_address = anchor_address - (backward_count * AVG_INSTRUCTION_SIZE);
+                    end_address = anchor_address + (forward_count * AVG_INSTRUCTION_SIZE);
+                    count = backward_count + forward_count + 1; // +1 for anchor instruction
+                    mode_type = "anchor";
+
+                    LOG_INFO("Disassemble request (anchor mode): anchor_address=0x" +
+                        std::to_string(anchor_address) + ", backward_count=" + std::to_string(backward_count) +
+                        ", forward_count=" + std::to_string(forward_count));
+                    break;
+                }
+                case lldbprotobuf::DisassembleRequest::kUntilPivot: {
+                    // 模式4：向后反汇编到锚点
+                    const auto& until_pivot = req.until_pivot();
+                    start_address = until_pivot.start_address();
+                    end_address = until_pivot.pivot_address();
+                    mode_type = "until_pivot";
+
+                    LOG_INFO("Disassemble request (until_pivot mode): start_address=0x" +
+                        std::to_string(start_address) + ", pivot_address=0x" + std::to_string(end_address));
+                    break;
+                }
+                default:
+                    LOG_ERROR("No disassemble mode specified in request");
+                    return SendDisassembleResponse(false, {}, 0, false, 0, "No disassemble mode specified", hash);
+            }
 
             // 如果设置了count，则计算结束地址
             if (count > 0) {
@@ -3146,7 +3284,7 @@ namespace Cangjie::Debugger {
             if (start_address >= end_address) {
                 LOG_ERROR("Invalid address range: start_address (0x" + std::to_string(start_address) +
                     ") >= end_address (0x" + std::to_string(end_address) + ")");
-                return SendDisassembleResponse(false, {}, 0, "Invalid address range", hash);
+                return SendDisassembleResponse(false, {}, 0, false, 0, "Invalid address range", hash);
             }
 
             // 限制反汇编范围以防止性能问题
@@ -3154,7 +3292,7 @@ namespace Cangjie::Debugger {
             if ((end_address - start_address) > MAX_DISASSEMBLE_SIZE) {
                 LOG_ERROR("Requested disassemble range too large: " +
                     std::to_string(end_address - start_address) + " > " + std::to_string(MAX_DISASSEMBLE_SIZE));
-                return SendDisassembleResponse(false, {}, 0, "Requested disassemble range too large", hash);
+                return SendDisassembleResponse(false, {}, 0, false, 0, "Requested disassemble range too large", hash);
             }
 
             // 计算要读取的内存大小
@@ -3169,7 +3307,7 @@ namespace Cangjie::Debugger {
                 LOG_ERROR("Failed to read memory for disassembly at address 0x" +
                     std::to_string(start_address) + ": " +
                     (error.GetCString() ? error.GetCString() : "Unknown error"));
-                return SendDisassembleResponse(false, {}, 0, "Failed to read memory for disassembly", hash);
+                return SendDisassembleResponse(false, {}, 0, false, 0, "Failed to read memory for disassembly", hash);
             }
 
             // 使用LLDB进行反汇编 - 使用ReadInstructions方法从内存反汇编
@@ -3180,7 +3318,7 @@ namespace Cangjie::Debugger {
             if (!instruction_list.IsValid()) {
                 LOG_ERROR("Failed to get instruction list for address range 0x" +
                     std::to_string(start_address) + " - 0x" + std::to_string(end_address));
-                return SendDisassembleResponse(false, {}, 0, "Failed to get instruction list", hash);
+                return SendDisassembleResponse(false, {}, 0, false, 0, "Failed to get instruction list", hash);
             }
 
             // 转换为protobuf格式
@@ -3273,26 +3411,30 @@ namespace Cangjie::Debugger {
             LOG_INFO("Successfully disassembled " + std::to_string(instructions.size()) +
                 " instructions, " + std::to_string(bytes_disassembled) + " bytes");
 
-            return SendDisassembleResponse(true, instructions, bytes_disassembled, "", hash);
+            return SendDisassembleResponse(true, instructions, bytes_disassembled, false, 0, "", hash);
         } catch (const std::exception &e) {
             LOG_ERROR("Exception during disassembly: " + std::string(e.what()));
-            return SendDisassembleResponse(false, {}, 0, "Exception during disassembly: " + std::string(e.what()),
+            return SendDisassembleResponse(false, {}, 0, false, 0, "Exception during disassembly: " + std::string(e.what()),
                                            hash);
         } catch (...) {
             LOG_ERROR("Unknown exception during disassembly");
-            return SendDisassembleResponse(false, {}, 0, "Unknown exception during disassembly", hash);
+            return SendDisassembleResponse(false, {}, 0, false, 0, "Unknown exception during disassembly", hash);
         }
     }
 
     bool DebuggerClient::SendDisassembleResponse(bool success,
                                                  const std::vector<lldbprotobuf::DisassembleInstruction> &instructions,
                                                  uint32_t bytes_disassembled,
+                                                 bool alignment_verified,
+                                                 uint64_t actual_end_address,
                                                  const std::string &error_message,
                                                  const std::optional<uint64_t> hash) const {
         auto disassemble_resp = ProtoConverter::CreateDisassembleResponse(
             success,
             instructions,
             bytes_disassembled,
+            alignment_verified,
+            actual_end_address,
             error_message
         );
 
@@ -3305,9 +3447,184 @@ namespace Cangjie::Debugger {
 
         LOG_INFO("Sending Disassemble response: success=" + std::to_string(success) +
             ", instructions=" + std::to_string(instructions.size()) +
-            ", bytes=" + std::to_string(bytes_disassembled));
+            ", bytes=" + std::to_string(bytes_disassembled) +
+            ", alignment_verified=" + std::to_string(alignment_verified));
 
         return tcp_client_.SendProtoMessage(response);
+    }
+
+    bool DebuggerClient::SendGetFunctionInfoResponse(bool success,
+                                                     const std::vector<lldbprotobuf::FunctionInfo> &functions,
+                                                     const std::string &error_message,
+                                                     const std::optional<uint64_t> hash) const {
+        auto function_info_resp = ProtoConverter::CreateGetFunctionInfoResponse(
+            success,
+            functions,
+            error_message
+        );
+
+        lldbprotobuf::Response response;
+        if (hash.has_value()) {
+            *response.mutable_hash() = CreateHashId(hash.value());
+        }
+
+        *response.mutable_get_function_info() = function_info_resp;
+
+        LOG_INFO("Sending GetFunctionInfo response: success=" + std::to_string(success) +
+            ", functions=" + std::to_string(functions.size()));
+
+        return tcp_client_.SendProtoMessage(response);
+    }
+
+    bool DebuggerClient::HandleGetFunctionInfoRequest(const lldbprotobuf::GetFunctionInfoRequest &req,
+                                                       const std::optional<uint64_t> hash) const {
+        LOG_INFO("Handling GetFunctionInfo request");
+
+        // 验证 target 是否有效
+        if (!target_.IsValid()) {
+            LOG_ERROR("No valid target available for function info query");
+            return SendGetFunctionInfoResponse(false, {}, "No valid target available", hash);
+        }
+
+        std::vector<lldbprotobuf::FunctionInfo> functions;
+
+        // 根据查询类型处理
+        switch (req.query_case()) {
+            case lldbprotobuf::GetFunctionInfoRequest::kAddress: {
+                // 按地址查询
+                uint64_t address = req.address();
+                LOG_INFO("Querying function info by address: 0x" + std::to_string(address));
+
+                // 解析地址
+                lldb::SBAddress sb_address = target_.ResolveLoadAddress(address);
+                if (!sb_address.IsValid()) {
+                    LOG_WARNING("Failed to resolve address: 0x" + std::to_string(address));
+                    return SendGetFunctionInfoResponse(false, {}, "Failed to resolve address", hash);
+                }
+
+                // 尝试获取函数信息
+                lldb::SBFunction function = sb_address.GetFunction();
+                if (function.IsValid()) {
+                    LOG_INFO("Found function: " + std::string(function.GetName() ? function.GetName() : "unnamed"));
+                    lldbprotobuf::FunctionInfo func_info = ProtoConverter::CreateFunctionInfo(function, target_);
+                    functions.push_back(func_info);
+                } else {
+                    // 如果没有函数信息，尝试获取符号信息
+                    lldb::SBSymbol symbol = sb_address.GetSymbol();
+                    if (symbol.IsValid()) {
+                        LOG_INFO("Found symbol: " + std::string(symbol.GetName() ? symbol.GetName() : "unnamed"));
+                        lldbprotobuf::FunctionInfo func_info = ProtoConverter::CreateFunctionInfoFromSymbol(symbol, target_);
+                        functions.push_back(func_info);
+                    } else {
+                        LOG_WARNING("No function or symbol found at address: 0x" + std::to_string(address));
+                        return SendGetFunctionInfoResponse(false, {}, "No function or symbol found at address", hash);
+                    }
+                }
+                break;
+            }
+
+            case lldbprotobuf::GetFunctionInfoRequest::kName: {
+                // 按名称查询
+                const std::string& name = req.name();
+                LOG_INFO("Querying function info by name: " + name);
+
+                if (name.empty()) {
+                    LOG_ERROR("Empty function name provided");
+                    return SendGetFunctionInfoResponse(false, {}, "Empty function name", hash);
+                }
+
+                // 使用 FindFunctions 查找函数
+                lldb::SBSymbolContextList symbol_contexts = target_.FindFunctions(name.c_str());
+                uint32_t num_contexts = symbol_contexts.GetSize();
+
+                LOG_INFO("Found " + std::to_string(num_contexts) + " matches for function name: " + name);
+
+                if (num_contexts == 0) {
+                    // 尝试使用 FindSymbols 查找符号
+                    lldb::SBSymbolContextList symbol_list = target_.FindSymbols(name.c_str());
+                    uint32_t num_symbols = symbol_list.GetSize();
+
+                    if (num_symbols == 0) {
+                        LOG_WARNING("No function or symbol found with name: " + name);
+                        return SendGetFunctionInfoResponse(false, {}, "No function found with name: " + name, hash);
+                    }
+
+                    // 处理符号结果
+                    for (uint32_t i = 0; i < num_symbols; ++i) {
+                        lldb::SBSymbolContext ctx = symbol_list.GetContextAtIndex(i);
+                        lldb::SBSymbol symbol = ctx.GetSymbol();
+
+                        if (symbol.IsValid()) {
+                            // 检查模块过滤
+                            if (!req.module_name().empty()) {
+                                lldb::SBModule module = ctx.GetModule();
+                                if (module.IsValid()) {
+                                    const char* mod_name = module.GetFileSpec().GetFilename();
+                                    if (mod_name && req.module_name() != mod_name) {
+                                        continue; // 跳过不匹配的模块
+                                    }
+                                }
+                            }
+
+                            lldbprotobuf::FunctionInfo func_info = ProtoConverter::CreateFunctionInfoFromSymbol(symbol, target_);
+                            functions.push_back(func_info);
+                        }
+                    }
+                } else {
+                    // 处理函数结果
+                    for (uint32_t i = 0; i < num_contexts; ++i) {
+                        lldb::SBSymbolContext ctx = symbol_contexts.GetContextAtIndex(i);
+                        lldb::SBFunction function = ctx.GetFunction();
+
+                        if (function.IsValid()) {
+                            // 检查模块过滤
+                            if (!req.module_name().empty()) {
+                                lldb::SBModule module = ctx.GetModule();
+                                if (module.IsValid()) {
+                                    const char* mod_name = module.GetFileSpec().GetFilename();
+                                    if (mod_name && req.module_name() != mod_name) {
+                                        continue; // 跳过不匹配的模块
+                                    }
+                                }
+                            }
+
+                            lldbprotobuf::FunctionInfo func_info = ProtoConverter::CreateFunctionInfo(function, target_);
+                            functions.push_back(func_info);
+                        } else {
+                            // 尝试从符号获取
+                            lldb::SBSymbol symbol = ctx.GetSymbol();
+                            if (symbol.IsValid()) {
+                                if (!req.module_name().empty()) {
+                                    lldb::SBModule module = ctx.GetModule();
+                                    if (module.IsValid()) {
+                                        const char* mod_name = module.GetFileSpec().GetFilename();
+                                        if (mod_name && req.module_name() != mod_name) {
+                                            continue;
+                                        }
+                                    }
+                                }
+
+                                lldbprotobuf::FunctionInfo func_info = ProtoConverter::CreateFunctionInfoFromSymbol(symbol, target_);
+                                functions.push_back(func_info);
+                            }
+                        }
+                    }
+                }
+
+                if (functions.empty()) {
+                    LOG_WARNING("No valid functions found matching criteria");
+                    return SendGetFunctionInfoResponse(false, {}, "No valid functions found", hash);
+                }
+                break;
+            }
+
+            default:
+                LOG_ERROR("Invalid query type in GetFunctionInfoRequest");
+                return SendGetFunctionInfoResponse(false, {}, "Invalid query type", hash);
+        }
+
+        LOG_INFO("Successfully retrieved " + std::to_string(functions.size()) + " function(s)");
+        return SendGetFunctionInfoResponse(true, functions, "", hash);
     }
 
     // ============================================================================

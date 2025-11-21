@@ -1312,6 +1312,8 @@ namespace Cangjie {
             bool success,
             const std::vector<lldbprotobuf::DisassembleInstruction>& instructions,
             uint32_t bytes_disassembled,
+            bool alignment_verified,
+            uint64_t actual_end_address,
             const std::string &error_message) {
             lldbprotobuf::DisassembleResponse response;
             *response.mutable_status() = CreateResponseStatus(success, error_message);
@@ -1323,6 +1325,8 @@ namespace Cangjie {
                     *new_instruction = instruction;
                 }
                 response.set_bytes_disassembled(bytes_disassembled);
+                response.set_alignment_verified(alignment_verified);
+                response.set_actual_end_address(actual_end_address);
             }
 
             return response;
@@ -1332,11 +1336,8 @@ namespace Cangjie {
         // 寄存器转换
         // ============================================================================
 
-        lldbprotobuf::Register ProtoConverter::CreateRegister(lldb::SBValue &sb_value, uint64_t register_id) {
+        lldbprotobuf::Register ProtoConverter::CreateRegister(lldb::SBValue &sb_value) {
             lldbprotobuf::Register reg;
-
-            // 设置寄存器ID
-            reg.mutable_id()->set_id(register_id);
 
             // 设置寄存器名称
             if (const char *name = sb_value.GetName()) {
@@ -1345,11 +1346,58 @@ namespace Cangjie {
                 reg.set_name("<unnamed_register>");
             }
 
-            // 设置寄存器值
+            // 设置寄存器值（十六进制字符串）
             if (const char *value = sb_value.GetValue()) {
                 reg.set_value(value);
+
+                // 设置无符号整数值（如果可以解析的话）
+                try {
+                    std::string value_str = value;
+                    if (value_str.find("0x") == 0 || value_str.find("0X") == 0) {
+                        // 尝试解析十六进制值
+                        uint64_t unsigned_val = std::stoull(value_str, nullptr, 16);
+                        reg.set_value_unsigned(unsigned_val);
+                    }
+                } catch (...) {
+                    // 如果解析失败，设置默认值0
+                    reg.set_value_unsigned(0);
+                }
             } else {
                 reg.set_value("0x0");
+                reg.set_value_unsigned(0);
+            }
+
+            // 设置寄存器大小（字节）
+            try {
+                reg.set_size(sb_value.GetByteSize());
+            } catch (...) {
+                // 如果获取大小失败，根据寄存器名称推断
+                std::string reg_name = reg.name();
+                if (reg_name.find("r") == 0 && reg_name.length() >= 2 && reg_name.length() <= 3) {
+                    // 64位通用寄存器 (rax, rbx, etc.)
+                    reg.set_size(8);
+                } else if (reg_name.find("e") == 0 && reg_name.length() >= 2 && reg_name.length() <= 3) {
+                    // 32位寄存器 (eax, ebx, etc.)
+                    reg.set_size(4);
+                } else if (reg_name.find("xmm") == 0) {
+                    // XMM寄存器 (128位)
+                    reg.set_size(16);
+                } else if (reg_name.find("ymm") == 0) {
+                    // YMM寄存器 (256位)
+                    reg.set_size(32);
+                } else if (reg_name.find("zmm") == 0) {
+                    // ZMM寄存器 (512位)
+                    reg.set_size(64);
+                } else {
+                    reg.set_size(8); // 默认8字节
+                }
+            }
+
+            // 设置类型名称
+            if (const char *type_name = sb_value.GetTypeName()) {
+                reg.set_type_name(type_name);
+            } else {
+                reg.set_type_name("register");
             }
 
             // 设置寄存器摘要（对于大寄存器提供摘要）
@@ -1360,19 +1408,6 @@ namespace Cangjie {
                 if (const char *value = sb_value.GetValue()) {
                     reg.set_summary(value);
                 }
-            }
-
-            // 安全地设置寄存器类型
-            try {
-                lldb::SBType sb_type = sb_value.GetType();
-                if (sb_type.IsValid()) {
-                    *reg.mutable_type() = CreateType(sb_type);
-                } else {
-                    // 为寄存器创建默认类型
-                    *reg.mutable_type() = CreateType("register", lldbprotobuf::TYPE_BUILTIN, "register");
-                }
-            } catch (...) {
-                *reg.mutable_type() = CreateType("register", lldbprotobuf::TYPE_BUILTIN, "register");
             }
 
             // 获取寄存器集合名称
@@ -1394,53 +1429,24 @@ namespace Cangjie {
                 reg_name.find("r13") != std::string::npos ||
                 reg_name.find("r14") != std::string::npos ||
                 reg_name.find("r15") != std::string::npos) {
-                reg.set_register_set("general");
+                reg.set_group_name("general");
             } else if (reg_name.find("xmm") != std::string::npos ||
                       reg_name.find("ymm") != std::string::npos ||
                       reg_name.find("zmm") != std::string::npos) {
-                reg.set_register_set("floating_point");
+                reg.set_group_name("floating_point");
             } else if (reg_name.find("cs") != std::string::npos ||
                       reg_name.find("ds") != std::string::npos ||
                       reg_name.find("es") != std::string::npos ||
                       reg_name.find("fs") != std::string::npos ||
                       reg_name.find("gs") != std::string::npos ||
                       reg_name.find("ss") != std::string::npos) {
-                reg.set_register_set("special");
+                reg.set_group_name("special");
             } else if (reg_name.find("st") != std::string::npos) {
-                reg.set_register_set("floating_point");
+                reg.set_group_name("floating_point");
             } else if (reg_name.find("mm") != std::string::npos) {
-                reg.set_register_set("vector");
+                reg.set_group_name("vector");
             } else {
-                reg.set_register_set("general");
-            }
-
-            // 设置是否为硬件寄存器
-            // 在LLDB中，寄存器通常是硬件寄存器
-            reg.set_is_hardware(true);
-
-            // 设置寄存器大小
-            try {
-                reg.set_size(sb_value.GetByteSize());
-            } catch (...) {
-                // 如果获取大小失败，根据寄存器名称推断
-                if (reg_name.find("r") == 0 && reg_name.length() >= 2 && reg_name.length() <= 3) {
-                    // 64位通用寄存器 (rax, rbx, etc.)
-                    reg.set_size(8);
-                } else if (reg_name.find("e") == 0 && reg_name.length() >= 2 && reg_name.length() <= 3) {
-                    // 32位寄存器 (eax, ebx, etc.)
-                    reg.set_size(4);
-                } else if (reg_name.find("xmm") == 0) {
-                    // XMM寄存器 (128位)
-                    reg.set_size(16);
-                } else if (reg_name.find("ymm") == 0) {
-                    // YMM寄存器 (256位)
-                    reg.set_size(32);
-                } else if (reg_name.find("zmm") == 0) {
-                    // ZMM寄存器 (512位)
-                    reg.set_size(64);
-                } else {
-                    reg.set_size(8); // 默认8字节
-                }
+                reg.set_group_name("general");
             }
 
             // 设置是否有子元素（对于向量寄存器等）
@@ -1455,11 +1461,11 @@ namespace Cangjie {
                 }
             }
 
-            // 设置更新标志
+            // 设置值是否发生变化
             try {
-                reg.set_value_did_change(sb_value.GetValueDidChange());
+                reg.set_changed(sb_value.GetValueDidChange());
             } catch (...) {
-                reg.set_value_did_change(false);
+                reg.set_changed(false);
             }
 
             return reg;
@@ -1467,15 +1473,12 @@ namespace Cangjie {
 
         lldbprotobuf::RegisterGroup ProtoConverter::CreateRegisterGroup(
             const std::string &name,
-            const std::string &description,
-            uint32_t register_count,
-            bool visible) {
+            uint32_t register_count) {
             lldbprotobuf::RegisterGroup group;
 
+            // RegisterGroup protobuf 消息只有 name 和 register_count 字段
             group.set_name(name);
-            group.set_description(description);
             group.set_register_count(register_count);
-            group.set_visible(visible);
 
             return group;
         }
@@ -1483,8 +1486,6 @@ namespace Cangjie {
         lldbprotobuf::RegistersResponse ProtoConverter::CreateRegistersResponse(
             bool success,
             const std::vector<lldbprotobuf::Register> &registers,
-            const std::vector<lldbprotobuf::RegisterGroup> &register_groups,
-            bool include_detailed_values,
             const std::string &error_message) {
             lldbprotobuf::RegistersResponse response;
 
@@ -1495,13 +1496,211 @@ namespace Cangjie {
                 for (const auto &reg : registers) {
                     *response.add_registers() = reg;
                 }
+            }
 
+            return response;
+        }
+
+        lldbprotobuf::RegisterGroupsResponse ProtoConverter::CreateRegisterGroupsResponse(
+            bool success,
+            const std::vector<lldbprotobuf::RegisterGroup> &register_groups,
+            const std::string &error_message) {
+            lldbprotobuf::RegisterGroupsResponse response;
+
+            *response.mutable_status() = CreateResponseStatus(success, error_message);
+
+            if (success) {
                 // 添加所有寄存器组
                 for (const auto &group : register_groups) {
-                    *response.add_register_groups() = group;
+                    *response.add_groups() = group;
+                }
+            }
+
+            return response;
+        }
+
+        // ============================================================================
+        // 函数信息转换
+        // ============================================================================
+
+        lldbprotobuf::FunctionInfo ProtoConverter::CreateFunctionInfo(
+              lldb::SBFunction& function,
+            const lldb::SBTarget& target) {
+            lldbprotobuf::FunctionInfo info;
+
+            // 设置函数名
+            if (const char* name = function.GetName()) {
+                info.set_name(name);
+            } else {
+                info.set_name("<unknown>");
+            }
+
+            // 设置修饰名
+            if (const char* mangled = function.GetMangledName()) {
+                info.set_mangled_name(mangled);
+            } else {
+                info.set_mangled_name("");
+            }
+
+            // 获取地址信息
+            lldb::SBAddress start_addr = function.GetStartAddress();
+            lldb::SBAddress end_addr = function.GetEndAddress();
+
+            if (start_addr.IsValid()) {
+                uint64_t start = start_addr.GetLoadAddress(target);
+                info.set_start_address(start);
+
+                if (end_addr.IsValid()) {
+                    uint64_t end = end_addr.GetLoadAddress(target);
+                    info.set_end_address(end);
+                    info.set_size(end - start);
+                } else {
+                    info.set_end_address(start);
+                    info.set_size(0);
+                }
+            }
+
+            // 获取源码位置
+            lldb::SBLineEntry line_entry = start_addr.GetLineEntry();
+            if (line_entry.IsValid()) {
+                lldb::SBFileSpec file_spec = line_entry.GetFileSpec();
+                if (file_spec.IsValid()) {
+                    char file_path[1024];
+                    file_spec.GetPath(file_path, sizeof(file_path));
+                    *info.mutable_location() = CreateSourceLocation(file_path, line_entry.GetLine());
+                }
+            }
+
+            // 获取模块信息
+            lldb::SBModule module = start_addr.GetModule();
+            if (module.IsValid()) {
+                if (const char* module_name = module.GetFileSpec().GetFilename()) {
+                    info.set_module_name(module_name);
+                }
+            }
+
+            // 获取语言类型
+            lldb::LanguageType lang_type = function.GetLanguage();
+            switch (lang_type) {
+                case lldb::eLanguageTypeC:
+                    info.set_language("c");
+                    break;
+                case lldb::eLanguageTypeC_plus_plus:
+                    info.set_language("c++");
+                    break;
+                case lldb::eLanguageTypeC99:
+                    info.set_language("c99");
+                    break;
+                case lldb::eLanguageTypeC11:
+                    info.set_language("c11");
+                    break;
+                case lldb::eLanguageTypeC_plus_plus_03:
+                    info.set_language("c++03");
+                    break;
+                case lldb::eLanguageTypeC_plus_plus_11:
+                    info.set_language("c++11");
+                    break;
+                case lldb::eLanguageTypeC_plus_plus_14:
+                    info.set_language("c++14");
+                    break;
+                case lldb::eLanguageTypeRust:
+                    info.set_language("rust");
+                    break;
+                case lldb::eLanguageTypeSwift:
+                    info.set_language("swift");
+                    break;
+                default:
+                    info.set_language("unknown");
+                    break;
+            }
+
+            // 设置 is_external: 检查是否有调试信息
+            info.set_is_external(!line_entry.IsValid());
+
+            // 设置 is_hole: 暂时设为 false
+            info.set_is_hole(false);
+
+            return info;
+        }
+
+        lldbprotobuf::FunctionInfo ProtoConverter::CreateFunctionInfoFromSymbol(
+              lldb::SBSymbol& symbol,
+            const lldb::SBTarget& target) {
+            lldbprotobuf::FunctionInfo info;
+
+            // 设置函数名
+            if (const char* name = symbol.GetName()) {
+                info.set_name(name);
+            } else {
+                info.set_name("<unknown>");
+            }
+
+            // 设置修饰名
+            if (const char* mangled = symbol.GetMangledName()) {
+                info.set_mangled_name(mangled);
+            } else {
+                info.set_mangled_name("");
+            }
+
+            // 获取地址信息
+            lldb::SBAddress start_addr = symbol.GetStartAddress();
+            lldb::SBAddress end_addr = symbol.GetEndAddress();
+
+            if (start_addr.IsValid()) {
+                uint64_t start = start_addr.GetLoadAddress(target);
+                info.set_start_address(start);
+
+                if (end_addr.IsValid()) {
+                    uint64_t end = end_addr.GetLoadAddress(target);
+                    info.set_end_address(end);
+                    info.set_size(end - start);
+                } else {
+                    info.set_end_address(start);
+                    info.set_size(0);
+                }
+            }
+
+            // 符号通常没有源码位置信息
+            *info.mutable_location() = CreateSourceLocation("", 0);
+
+            // 获取模块信息
+            lldb::SBModule module = start_addr.GetModule();
+            if (module.IsValid()) {
+                if (const char* module_name = module.GetFileSpec().GetFilename()) {
+                    info.set_module_name(module_name);
+                }
+            }
+
+            // 符号通常无语言类型信息
+            info.set_language("unknown");
+
+            // 符号是外部符号（无调试信息）
+            info.set_is_external(true);
+
+            // 设置 is_hole: 暂时设为 false
+            info.set_is_hole(false);
+
+            return info;
+        }
+
+        lldbprotobuf::GetFunctionInfoResponse ProtoConverter::CreateGetFunctionInfoResponse(
+            bool success,
+            const std::vector<lldbprotobuf::FunctionInfo>& functions,
+            const std::string& error_message) {
+            lldbprotobuf::GetFunctionInfoResponse response;
+
+            *response.mutable_status() = CreateResponseStatus(success, error_message);
+
+            if (success && !functions.empty()) {
+                // 如果只有一个结果，设置到 function 字段
+                if (functions.size() == 1) {
+                    *response.mutable_function() = functions[0];
                 }
 
-                response.set_include_detailed_values(include_detailed_values);
+                // 所有结果都添加到 functions 列表
+                for (const auto& func : functions) {
+                    *response.add_functions() = func;
+                }
             }
 
             return response;
