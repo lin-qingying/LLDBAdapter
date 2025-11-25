@@ -213,6 +213,48 @@ message StepOutRequest {
 }
 
 /**
+ * 运行到光标处请求
+ *
+ * 执行程序直到到达指定的源代码位置或地址。
+ * 这是一个常用的调试功能，允许快速运行到用户感兴趣的位置。
+ *
+ * LLDB API 对应：
+ *   - SBThread::RunToAddress() - 运行到指定地址
+ *   - 临时断点方式：SBTarget::BreakpointCreateByLocation() + Continue
+ *
+ * 实现方式：
+ *   - 地址模式：直接使用 SBThread::RunToAddress()
+ *   - 源代码位置模式：可选择使用临时断点或解析地址后使用 RunToAddress
+ *
+ * 使用场景：
+ *   - 快速跳过不关心的代码
+ *   - 运行到循环的特定迭代
+ *   - 跳到函数的特定位置
+ */
+message RunToCursorRequest {
+  // 目标线程 ID
+  // 指定要执行的线程
+  Id thread_id = 1;
+
+  // 目标位置（二选一）
+  oneof target {
+    // 源代码位置：文件和行号
+    // 使用临时断点方式实现
+    SourceLocation source_location = 2;
+
+    // 内存地址
+    // 使用 SBThread::RunToAddress() 实现
+    uint64 address = 3;
+  }
+
+  // 是否强制使用临时断点方式
+  // true: 即使是地址模式也使用临时断点
+  // false: 地址模式使用 RunToAddress，源代码位置模式使用临时断点（默认）
+  // 注意：临时断点在命中后会自动删除
+  bool force_temp_breakpoint = 4;
+}
+
+/**
  * 终止进程请求
  *
  * 强制终止被调试进程。
@@ -833,6 +875,66 @@ message DisassembleUntilPivotMode {
 
 
 /* =========================================================================
+ * 控制台命令请求
+ * ========================================================================= */
+
+/**
+ * 执行 LLDB 命令请求
+ *
+ * 执行任意 LLDB 控制台命令，支持所有内置命令。
+ * 这提供了对 LLDB 功能的完全访问。
+ *
+ * LLDB API 对应：
+ *   - SBCommandInterpreter::HandleCommand() - 执行命令
+ *   - SBCommandReturnObject - 命令执行结果
+ *
+ * 支持的命令示例：
+ *   - "thread list" - 列出所有线程
+ *   - "bt" - 显示调用栈
+ *   - "expr myVar" - 求值表达式
+ *   - "p *ptr" - 打印指针指向的内容
+ *   - "memory read 0x1234" - 读取内存
+ *   - "disassemble -n main" - 反汇编函数
+ *   - "settings set target.x86-disassembly-flavor intel" - 设置选项
+ *
+ * 使用场景：
+ *   - 调试高级功能
+ *   - 访问专用的 LLDB 命令
+ *   - 脚本自动化
+ *   - IDE 控制台窗口
+ *
+ * 注意：
+ *   - 某些命令可能需要进程处于特定状态
+ *   - 命令执行可能有副作用（如修改进程状态）
+ *   - 命令输出通过标准输出/错误返回
+ */
+message ExecuteCommandRequest {
+  // LLDB 命令字符串
+  // 示例: "thread list", "expr myVar", "p *ptr"
+  // 支持完整的 LLDB 命令语法
+  string command = 1;
+
+  // 是否在命令执行时回显命令
+  // true: 在输出中包含命令本身（类似控制台）
+  // false: 只返回命令结果（默认）
+  bool echo_command = 2;
+
+  // 是否立即返回
+  // true: 异步执行，立即返回（适用于长时间运行的命令）
+  // false: 等待命令完成后返回（默认）
+  bool async_execution = 3;
+
+  // 可选：执行上下文的线程 ID
+  // 某些命令需要线程上下文（如 "frame variable"）
+  Id thread_id = 4;
+
+  // 可选：执行上下文的栈帧索引
+  // 某些命令需要栈帧上下文
+  uint32 frame_index = 5;
+}
+
+
+/* =========================================================================
  * 函数信息请求
  * ========================================================================= */
 
@@ -921,11 +1023,15 @@ message Request {
     StepIntoRequest step_into = 18;           // 单步进入
     StepOverRequest step_over = 19;           // 单步跳过
     StepOutRequest step_out = 26;             // 单步跳出
+    RunToCursorRequest run_to_cursor = 31;    // 运行到光标处
     TerminateRequest terminate = 20;          // 终止进程
     DetachRequest detach = 21;                // 分离调试器
     ExitRequest exit = 27;                    // 退出调试器
 
     // ===== 符号信息 =====
     GetFunctionInfoRequest get_function_info = 30; // 获取函数信息
+
+    // ===== 控制台命令 =====
+    ExecuteCommandRequest execute_command = 32;  // 执行 LLDB 命令
   }
 }

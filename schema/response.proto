@@ -531,6 +531,32 @@ message StepOutResponse {
 }
 
 /**
+ * 运行到光标处响应
+ *
+ * 返回运行到光标处命令的结果。
+ * 对应 RunToCursorRequest。
+ *
+ * 注意：
+ *   - 此响应表示命令已接受，程序开始执行
+ *   - 程序到达目标位置或中途停止时会通过 ProcessStopped 事件通知
+ *   - 如果使用临时断点方式，断点会在命中后自动删除
+ */
+message RunToCursorResponse {
+  // 操作状态
+  Status status = 1;
+
+  // 如果使用了临时断点方式，返回临时断点的 ID
+  // 客户端可以用此 ID 在需要时手动删除断点
+  // 如果使用 SBThread::RunToAddress() 方式，此字段为空
+  Id temp_breakpoint_id = 2;
+
+  // 实际使用的实现方式
+  // "run_to_address": 使用 SBThread::RunToAddress()
+  // "temp_breakpoint": 使用临时断点 + Continue
+  string method_used = 3;
+}
+
+/**
  * 终止进程响应
  *
  * 返回终止进程命令的结果。
@@ -561,6 +587,50 @@ message DetachResponse {
 message ExitResponse {
   // 操作状态
   Status status = 2;
+}
+
+/**
+ * 执行命令响应
+ *
+ * LLDB 命令执行的结果。
+ *
+ * LLDB API 对应：
+ *   - SBCommandReturnObject::GetOutput() - 标准输出
+ *   - SBCommandReturnObject::GetError() - 标准错误
+ *   - SBCommandReturnObject::Succeeded() - 命令是否成功
+ *   - SBCommandReturnObject::GetStatus() - 命令执行状态
+ *
+ * 输出格式：
+ *   - output: 命令的标准输出内容（如果有）
+ *   - error_output: 命令的错误输出内容（如果有）
+ *   - status: 命令执行状态（成功/失败）
+ *   - return_status: LLDB 的 ReturnStatus 枚举值
+ */
+message ExecuteCommandResponse {
+  // 操作状态
+  // success: 命令执行成功
+  // error_message: 执行失败的错误信息
+  Status status = 1;
+
+  // 命令的标准输出
+  // 包含命令的正常输出内容
+  string output = 2;
+
+  // 命令的错误输出
+  // 包含命令的错误信息或警告
+  string error_output = 3;
+
+  // LLDB 返回状态
+  // 对应 lldb::ReturnStatus 枚举
+  // 0: eReturnStatusSuccessFinishNoResult
+  // 1: eReturnStatusSuccessFinishResult
+  // 2: eReturnStatusSuccessContinuingNoResult
+  // 3: eReturnStatusSuccessContinuingResult
+  // 4: eReturnStatusStarted
+  // 5: eReturnStatusFailed
+  // 6: eReturnStatusQuit
+  // 7: eReturnStatusInvalid
+  int32 return_status = 4;
 }
 
 
@@ -625,10 +695,14 @@ message Response {
     StepIntoResponse step_into = 22;           // 单步进入响应
     StepOverResponse step_over = 23;           // 单步跳过响应
     StepOutResponse step_out = 24;             // 单步跳出响应
+    RunToCursorResponse run_to_cursor = 33;    // 运行到光标处响应
     ContinueResponse continue = 25;            // 继续执行响应
     SuspendResponse suspend = 26;              // 暂停执行响应
 
     // ===== 符号信息响应 =====
     GetFunctionInfoResponse get_function_info = 32; // 获取函数信息响应
+
+    // ===== 控制台命令响应 =====
+    ExecuteCommandResponse execute_command = 34;  // 执行 LLDB 命令响应
   }
 }

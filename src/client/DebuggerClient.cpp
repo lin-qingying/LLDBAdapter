@@ -233,6 +233,25 @@ namespace Cangjie::Debugger {
         return tcp_client_.SendProtoMessage(response);
     }
 
+    bool DebuggerClient::SendRunToCursorResponse(bool success, uint64_t temp_breakpoint_id,
+                                                  const std::string &method_used,
+                                                  const std::string &error_message,
+                                                  const std::optional<uint64_t> hash) const {
+        auto run_to_cursor_resp = ProtoConverter::CreateRunToCursorResponse(
+            success, temp_breakpoint_id, method_used, error_message);
+
+        lldbprotobuf::Response response;
+        if (hash.has_value()) {
+            *response.mutable_hash() = CreateHashId(hash.value());
+        }
+
+        *response.mutable_run_to_cursor() = run_to_cursor_resp;
+
+        LOG_INFO("Sending RunToCursor response: success=" + std::to_string(success) +
+                 ", method=" + method_used);
+        return tcp_client_.SendProtoMessage(response);
+    }
+
     bool DebuggerClient::SendAttachResponse(bool success, const std::string &error_message,
                                             const std::optional<uint64_t> hash) const {
         auto attach_resp = ProtoConverter::CreateAttachResponse(success, -1, error_message);
@@ -386,6 +405,30 @@ namespace Cangjie::Debugger {
         return tcp_client_.SendProtoMessage(response);
     }
 
+    bool DebuggerClient::SendExecuteCommandResponse(bool success,
+                                                     const std::string &output,
+                                                     const std::string &error_output,
+                                                     int32_t return_status,
+                                                     const std::string &error_message,
+                                                     const std::optional<uint64_t> hash) const {
+        auto execute_cmd_resp = ProtoConverter::CreateExecuteCommandResponse(
+            success,
+            output,
+            error_output,
+            return_status,
+            error_message
+        );
+
+        lldbprotobuf::Response response;
+        if (hash.has_value()) {
+            *response.mutable_hash() = CreateHashId(hash.value());
+        }
+        *response.mutable_execute_command() = execute_cmd_resp;
+
+        LOG_INFO("Sending ExecuteCommand response: success=" + std::to_string(success));
+        return tcp_client_.SendProtoMessage(response);
+    }
+
 
     bool DebuggerClient::ReceiveRequest(lldbprotobuf::Request &request) const {
         return tcp_client_.ReceiveProtoMessage(request);
@@ -429,6 +472,9 @@ namespace Cangjie::Debugger {
         if (request.has_step_out()) {
             return HandleStepOutRequest(request.step_out(), request.hash());
         }
+        if (request.has_run_to_cursor()) {
+            return HandleRunToCursorRequest(request.run_to_cursor(), request.hash());
+        }
 
         // Breakpoints and Watchpoints
         if (request.has_add_breakpoint()) {
@@ -449,9 +495,10 @@ namespace Cangjie::Debugger {
 
 
         // Console and Commands
+    if (request.has_execute_command()) {
+        return HandleExecuteCommandRequest(request.execute_command(), request.hash());
+    }
 
-
-        // Platform and Remote Debugging
 
 
         // Thread Control
@@ -508,9 +555,9 @@ namespace Cangjie::Debugger {
             return HandleGetFunctionInfoRequest(request.get_function_info(), request.hash());
         }
 
-        // Signal Handling
 
-        // Symbol Download
+
+
 
 
         LOG_WARNING("Received unknown or unhandled request type");
@@ -1228,6 +1275,134 @@ namespace Cangjie::Debugger {
         } catch (...) {
             LOG_ERROR("StepOut failed with unknown error for thread " + std::to_string(req.thread_id().id()));
             return SendStepOutResponse(false, "Step out operation failed", hash);
+        }
+    }
+
+    bool DebuggerClient::HandleRunToCursorRequest(const lldbprotobuf::RunToCursorRequest &req,
+                                                   const std::optional<uint64_t> hash) const {
+        LOG_INFO("Handling RunToCursor request for thread ID: " + std::to_string(req.thread_id().id()));
+
+        // 验证进程是否有效
+        if (!process_.IsValid()) {
+            LOG_ERROR("No valid process available for run to cursor");
+            return SendRunToCursorResponse(false, 0, "", "No valid process available", hash);
+        }
+
+        // 验证目标是否有效
+        if (!target_.IsValid()) {
+            LOG_ERROR("No valid target available for run to cursor");
+            return SendRunToCursorResponse(false, 0, "", "No valid target available", hash);
+        }
+
+        // 查找指定的线程
+        lldb::SBThread target_thread;
+        uint32_t num_threads = process_.GetNumThreads();
+        bool thread_found = false;
+
+        for (uint32_t i = 0; i < num_threads; ++i) {
+            lldb::SBThread sb_thread = process_.GetThreadAtIndex(i);
+            if (sb_thread.IsValid() && sb_thread.GetThreadID() == req.thread_id().id()) {
+                target_thread = sb_thread;
+                thread_found = true;
+                break;
+            }
+        }
+
+        if (!thread_found) {
+            LOG_ERROR("Thread not found for run to cursor: " + std::to_string(req.thread_id().id()));
+            return SendRunToCursorResponse(false, 0, "", "Thread not found", hash);
+        }
+
+        // 设置当前线程
+        process_.SetSelectedThread(target_thread);
+
+        try {
+            // 确定使用哪种方法
+            bool use_address_method = false;
+            uint64_t target_address = 0;
+            std::string target_file;
+            uint32_t target_line = 0;
+
+            // 检查目标类型
+            if (req.has_address()) {
+                // 有地址目标
+                target_address = req.address();
+                use_address_method = !req.force_temp_breakpoint();
+                LOG_INFO("RunToCursor target: address 0x" + std::to_string(target_address) +
+                        ", force_temp_breakpoint=" + std::to_string(req.force_temp_breakpoint()));
+            } else if (req.has_source_location()) {
+                // 有源码位置目标
+                const auto& location = req.source_location();
+                target_file = location.file_path();
+                target_line = location.line();
+
+                // 源码位置需要使用临时断点方法
+                use_address_method = false;
+                LOG_INFO("RunToCursor target: " + target_file + ":" + std::to_string(target_line));
+            } else {
+                LOG_ERROR("No target specified for run to cursor");
+                return SendRunToCursorResponse(false, 0, "", "No target specified", hash);
+            }
+
+            // 方法1: 使用 SBThread::RunToAddress()
+            if (use_address_method && target_address != 0) {
+                LOG_INFO("Using RunToAddress method");
+
+                target_thread.RunToAddress(target_address);
+
+                LOG_INFO("RunToAddress initiated successfully to address 0x" + std::to_string(target_address));
+                return SendRunToCursorResponse(true, 0, "run_to_address", "", hash);
+            }
+
+            // 方法2: 使用临时断点
+            LOG_INFO("Using temporary breakpoint method");
+
+            lldb::SBBreakpoint temp_bp;
+
+            if (target_address != 0) {
+                // 使用地址创建临时断点
+                temp_bp = target_.BreakpointCreateByAddress(target_address);
+                LOG_INFO("Created temporary breakpoint at address 0x" + std::to_string(target_address));
+            } else if (!target_file.empty() && target_line > 0) {
+                // 使用源码位置创建临时断点
+                temp_bp = target_.BreakpointCreateByLocation(target_file.c_str(), target_line);
+                LOG_INFO("Created temporary breakpoint at " + target_file + ":" + std::to_string(target_line));
+            } else {
+                LOG_ERROR("Invalid target for temporary breakpoint");
+                return SendRunToCursorResponse(false, 0, "", "Invalid target for temporary breakpoint", hash);
+            }
+
+            if (!temp_bp.IsValid()) {
+                LOG_ERROR("Failed to create temporary breakpoint");
+                return SendRunToCursorResponse(false, 0, "", "Failed to create temporary breakpoint", hash);
+            }
+
+            // 设置为一次性断点
+            temp_bp.SetOneShot(true);
+
+            uint64_t breakpoint_id = temp_bp.GetID();
+            LOG_INFO("Temporary breakpoint ID: " + std::to_string(breakpoint_id) + " (one-shot)");
+
+            // 继续执行进程
+            lldb::SBError error = process_.Continue();
+            if (error.Fail()) {
+                LOG_ERROR("Failed to continue process: " + std::string(error.GetCString()));
+                // 清理临时断点
+                target_.BreakpointDelete(breakpoint_id);
+                return SendRunToCursorResponse(false, 0, "",
+                    "Failed to continue process: " + std::string(error.GetCString()), hash);
+            }
+
+            LOG_INFO("RunToCursor with temporary breakpoint initiated successfully");
+            return SendRunToCursorResponse(true, breakpoint_id, "temp_breakpoint", "", hash);
+
+        } catch (const std::exception &e) {
+            LOG_ERROR("RunToCursor failed for thread " + std::to_string(req.thread_id().id()) + ": " + e.what());
+            return SendRunToCursorResponse(false, 0, "",
+                "Run to cursor failed: " + std::string(e.what()), hash);
+        } catch (...) {
+            LOG_ERROR("RunToCursor failed with unknown error for thread " + std::to_string(req.thread_id().id()));
+            return SendRunToCursorResponse(false, 0, "", "Run to cursor operation failed", hash);
         }
     }
 
@@ -3336,10 +3511,28 @@ namespace Cangjie::Debugger {
                     continue;
                 }
 
+                // 获取指令地址
+                uint64_t inst_address = instruction.GetAddress().GetLoadAddress(target_);
+
+                // 验证指令地址在请求的范围内
+                // 注意：只有在使用范围模式（end_address != 0）时才进行此检查
+                if (end_address > 0 && inst_address >= end_address) {
+                    LOG_INFO("Stopping disassembly: instruction at 0x" + std::to_string(inst_address) +
+                            " is beyond requested end address 0x" + std::to_string(end_address));
+                    break; // 超出范围，停止遍历
+                }
+
+                // 对于向前遍历的场景，还要确保不小于起始地址
+                if (inst_address < start_address) {
+                    LOG_WARNING("Skipping instruction at 0x" + std::to_string(inst_address) +
+                               " (before requested start address 0x" + std::to_string(start_address) + ")");
+                    continue;
+                }
+
                 lldbprotobuf::DisassembleInstruction proto_instruction;
 
                 // 设置地址
-                proto_instruction.set_address(instruction.GetAddress().GetLoadAddress(target_));
+                proto_instruction.set_address(inst_address);
 
                 // 设置指令大小
                 uint32_t instruction_size = instruction.GetByteSize();
@@ -3625,6 +3818,109 @@ namespace Cangjie::Debugger {
 
         LOG_INFO("Successfully retrieved " + std::to_string(functions.size()) + " function(s)");
         return SendGetFunctionInfoResponse(true, functions, "", hash);
+    }
+
+    bool DebuggerClient::HandleExecuteCommandRequest(const lldbprotobuf::ExecuteCommandRequest &req,
+                                                      const std::optional<uint64_t> hash) const {
+        LOG_INFO("Handling ExecuteCommand request: command='" + req.command() + "'" +
+            ", echo_command=" + std::to_string(req.echo_command()) +
+            ", async_execution=" + std::to_string(req.async_execution()));
+
+        // 验证 LLDB 是否已初始化
+        if (!InitializeLLDB()) {
+            LOG_ERROR("Failed to initialize LLDB for command execution");
+            return SendExecuteCommandResponse(false, "", "", 0, "LLDB not available", hash);
+        }
+
+        // 获取命令解释器
+        lldb::SBCommandInterpreter interpreter = debugger_.GetCommandInterpreter();
+        if (!interpreter.IsValid()) {
+            LOG_ERROR("Failed to get command interpreter");
+            return SendExecuteCommandResponse(false, "", "", 0, "Failed to get command interpreter", hash);
+        }
+
+        // 创建返回对象来接收命令结果
+        lldb::SBCommandReturnObject result;
+
+        // 可选：设置执行上下文（线程和栈帧）
+        if (req.has_thread_id() && process_.IsValid()) {
+            // 查找指定的线程
+            lldb::SBThread target_thread;
+            uint32_t num_threads = process_.GetNumThreads();
+            bool thread_found = false;
+
+            for (uint32_t i = 0; i < num_threads; ++i) {
+                lldb::SBThread sb_thread = process_.GetThreadAtIndex(i);
+                if (sb_thread.IsValid() && sb_thread.GetThreadID() == req.thread_id().id()) {
+                    target_thread = sb_thread;
+                    thread_found = true;
+                    break;
+                }
+            }
+
+            if (thread_found) {
+                // 设置选中的线程
+                process_.SetSelectedThread(target_thread);
+
+                // 如果指定了栈帧索引，也设置选中的栈帧
+                if (req.frame_index() > 0 && req.frame_index() < target_thread.GetNumFrames()) {
+                    target_thread.SetSelectedFrame(req.frame_index());
+                    LOG_INFO("Set execution context: thread_id=" + std::to_string(req.thread_id().id()) +
+                        ", frame_index=" + std::to_string(req.frame_index()));
+                }
+            } else {
+                LOG_WARNING("Thread not found: " + std::to_string(req.thread_id().id()) + ", using default context");
+            }
+        }
+
+        // 执行 LLDB 命令
+        LOG_INFO("Executing LLDB command: " + req.command());
+
+        lldb::ReturnStatus return_status;
+
+        // LLDB API 统一使用 HandleCommand 方法
+        // 注意: async_execution 标志在这里不影响 HandleCommand 的行为
+        // HandleCommand 本身是同步的，但命令内容可能触发异步操作（如 continue、run 等）
+        return_status = interpreter.HandleCommand(
+            req.command().c_str(),
+            result,
+            true  // add_to_history
+        );
+
+        // 提取输出
+        std::string output;
+        std::string error_output;
+
+        if (result.GetOutputSize() > 0) {
+            output = result.GetOutput();
+        }
+
+        if (result.GetErrorSize() > 0) {
+            error_output = result.GetError();
+        }
+
+        // 如果请求回显命令，在输出前添加命令文本
+        if (req.echo_command() && !output.empty()) {
+            output = "(lldb) " + req.command() + "\n" + output;
+        }
+
+        // 判断命令是否成功执行
+        bool success = result.Succeeded();
+
+        LOG_INFO("Command execution completed: success=" + std::to_string(success) +
+            ", return_status=" + std::to_string(return_status) +
+            ", output_size=" + std::to_string(output.size()) +
+            ", error_size=" + std::to_string(error_output.size()));
+
+        // 发送响应
+        return SendExecuteCommandResponse(
+            success,
+            output,
+            error_output,
+            static_cast<int32_t>(return_status),
+            success ? "" : "Command execution failed",
+            hash
+        );
     }
 
     // ============================================================================

@@ -65,6 +65,7 @@ public:
     bool SendStepIntoResponse(bool success = true, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
     bool SendStepOverResponse(bool success = true, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
     bool SendStepOutResponse(bool success = true, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
+    bool SendRunToCursorResponse(bool success = true, uint64_t temp_breakpoint_id = 0, const std::string& method_used = "", const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
     bool SendThreadsResponse(bool success = true, const std::vector<lldbprotobuf::Thread>& threads = {}, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
     bool SendFramesResponse(bool success = true, const std::vector<lldbprotobuf::Frame>& frames = {}, uint32_t total_frames = 0, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
     bool SendVariablesResponse(bool success = true, const std::vector<lldbprotobuf::Variable>& variables = {}, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
@@ -98,7 +99,15 @@ public:
     ) const;
     bool SendRemoveBreakpointResponse(bool success = true, const std::string& error_message = "", const std::optional<uint64_t> hash = std::nullopt) const;
 
-
+    // Console Command Response
+    bool SendExecuteCommandResponse(
+        bool success,
+        const std::string& output,
+        const std::string& error_output,
+        int32_t return_status,
+        const std::string& error_message = "",
+        const std::optional<uint64_t> hash = std::nullopt
+    ) const;
 
 
 
@@ -341,6 +350,7 @@ private:
     bool HandleStepIntoRequest(const lldbprotobuf::StepIntoRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
     bool HandleStepOverRequest(const lldbprotobuf::StepOverRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
     bool HandleStepOutRequest(const lldbprotobuf::StepOutRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
+    bool HandleRunToCursorRequest(const lldbprotobuf::RunToCursorRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
 
 
     // ============================================================================
@@ -370,6 +380,7 @@ private:
     // ============================================================================
     // Request Handlers - Console and Commands
     // ============================================================================
+    bool HandleExecuteCommandRequest(const lldbprotobuf::ExecuteCommandRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
 
 
     // ============================================================================

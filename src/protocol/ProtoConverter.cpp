@@ -896,6 +896,23 @@ namespace Cangjie {
             return response;
         }
 
+        lldbprotobuf::RunToCursorResponse ProtoConverter::CreateRunToCursorResponse(
+            bool success,
+            uint64_t temp_breakpoint_id,
+            const std::string &method_used,
+            const std::string &error_message) {
+
+            lldbprotobuf::RunToCursorResponse response;
+            *response.mutable_status() = CreateResponseStatus(success, error_message);
+
+            if (temp_breakpoint_id > 0) {
+                *response.mutable_temp_breakpoint_id() = CreateId(temp_breakpoint_id);
+            }
+
+            response.set_method_used(method_used);
+            return response;
+        }
+
         lldbprotobuf::RemoveBreakpointResponse ProtoConverter::CreateRemoveBreakpointResponse(bool success,
             const std::string &error_message) {
             lldbprotobuf::RemoveBreakpointResponse response;
@@ -1702,6 +1719,33 @@ namespace Cangjie {
                     *response.add_functions() = func;
                 }
             }
+
+            return response;
+        }
+
+        // ============================================================================
+        // 控制台命令响应创建
+        // ============================================================================
+
+        lldbprotobuf::ExecuteCommandResponse ProtoConverter::CreateExecuteCommandResponse(
+            bool success,
+            const std::string &output,
+            const std::string &error_output,
+            int32_t return_status,
+            const std::string &error_message) {
+            lldbprotobuf::ExecuteCommandResponse response;
+
+            // 设置操作状态
+            *response.mutable_status() = CreateResponseStatus(success, error_message);
+
+            // 设置命令输出
+            response.set_output(output);
+
+            // 设置错误输出
+            response.set_error_output(error_output);
+
+            // 设置 LLDB 返回状态
+            response.set_return_status(return_status);
 
             return response;
         }

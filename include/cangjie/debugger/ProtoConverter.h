@@ -241,6 +241,15 @@ namespace Cangjie {
                 const std::string &error_message = "");
 
             /**
+             * @brief 创建运行到光标处响应
+             */
+            static lldbprotobuf::RunToCursorResponse CreateRunToCursorResponse(
+                bool success,
+                uint64_t temp_breakpoint_id = 0,
+                const std::string &method_used = "",
+                const std::string &error_message = "");
+
+            /**
              * @brief 创建移除断点响应
              */
             static lldbprotobuf::RemoveBreakpointResponse CreateRemoveBreakpointResponse(
@@ -462,6 +471,26 @@ namespace Cangjie {
                 bool success,
                 const lldbprotobuf::Breakpoint &breakpoint,
                 const std::vector<lldbprotobuf::BreakpointLocation> &locations,
+                const std::string &error_message = "");
+
+            // ========================================================================
+            // 控制台命令响应创建
+            // ========================================================================
+
+            /**
+             * @brief 创建执行命令响应
+             *
+             * @param success 命令是否成功执行
+             * @param output 命令的标准输出
+             * @param error_output 命令的错误输出
+             * @param return_status LLDB 返回状态码 (0-7)
+             * @param error_message 错误消息（失败时）
+             */
+            static lldbprotobuf::ExecuteCommandResponse CreateExecuteCommandResponse(
+                bool success,
+                const std::string &output = "",
+                const std::string &error_output = "",
+                int32_t return_status = 0,
                 const std::string &error_message = "");
         };
     } // namespace Debugger
