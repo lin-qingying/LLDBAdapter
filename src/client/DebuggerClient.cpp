@@ -634,6 +634,11 @@ namespace Cangjie::Debugger {
             LOG_INFO("InitializedEvent sent successfully");
         }
 
+        // 立即启动事件监听线程，使其可以接收后续创建的 target 的事件
+        // 这样可以确保在 CreateTarget 和 AddBreakpoint 之前，事件监听器已经准备好
+        if (!event_thread_running_.load()) {
+            const_cast<DebuggerClient*>(this)->StartEventThread();
+        }
 
         return true;
     }
@@ -727,6 +732,19 @@ namespace Cangjie::Debugger {
             if (!success) {
                 LOG_ERROR("Failed to create target");
                 return SendCreateTargetResponse(false, "Failed to create target", hash);
+            }
+
+            // 立即注册 Target 事件监听器，以便后续添加的断点事件能被监听
+            if (event_listener_.IsValid() && target_.IsValid()) {
+                target_.GetBroadcaster().AddListener(
+                    event_listener_,
+                    lldb::SBTarget::eBroadcastBitBreakpointChanged | // 断点改变
+                    lldb::SBTarget::eBroadcastBitModulesLoaded | // 模块加载
+                    lldb::SBTarget::eBroadcastBitModulesUnloaded | // 模块卸载
+                    lldb::SBTarget::eBroadcastBitWatchpointChanged | // 监视点改变
+                    lldb::SBTarget::eBroadcastBitSymbolsLoaded // 符号加载
+                );
+                LOG_INFO("Registered target event listeners immediately after target creation");
             }
         } else {
             return SendCreateTargetResponse(false, "LLDB not available", hash);
@@ -919,16 +937,8 @@ namespace Cangjie::Debugger {
 
 
         // ============================================
-        // 9. 启动进程事件监控线程
-        // ============================================
-        // 启动异步事件监听线程
-        // 事件监控会处理：
-        // - 断点命中
-        // - 进程暂停/继续
-        // - 进程退出（正常退出或崩溃）
-        // - 异常/信号
-        LOG_INFO("Starting async event monitoring thread...");
-        StartEventThread();
+        // 注意：事件监听线程已经在 InitializeLLDB() 中提前启动
+        // 这样可以确保在添加断点时就能接收到断点状态变更事件
 
         return response_sent;
     }
@@ -1772,6 +1782,48 @@ namespace Cangjie::Debugger {
 
             if (!sb_value.IsValid()) {
                 continue;
+            }
+
+            // 如果请求了只显示作用域内的变量，额外检查变量是否真的在作用域内
+            if (req.in_scope_only()) {
+                // 检查变量是否在当前PC位置的作用域内
+                // 方法1: 检查变量是否有错误（通常未初始化的变量会有错误）
+                lldb::SBError var_error = sb_value.GetError();
+
+                // 方法2: 获取变量的声明信息来验证作用域
+                lldb::SBDeclaration decl = sb_value.GetDeclaration();
+                if (decl.IsValid()) {
+                    // 获取当前执行位置
+                    lldb::SBLineEntry line_entry = target_frame.GetLineEntry();
+                    if (line_entry.IsValid()) {
+                        uint32_t current_line = line_entry.GetLine();
+                        uint32_t var_decl_line = decl.GetLine();
+
+                        // 检查文件是否相同
+                        lldb::SBFileSpec current_file = line_entry.GetFileSpec();
+                        lldb::SBFileSpec var_file = decl.GetFileSpec();
+
+                        bool same_file = false;
+                        if (current_file.IsValid() && var_file.IsValid()) {
+                            char current_path[1024] = {0};
+                            char var_path[1024] = {0};
+                            current_file.GetPath(current_path, sizeof(current_path));
+                            var_file.GetPath(var_path, sizeof(var_path));
+                            same_file = (std::string(current_path) == std::string(var_path));
+                        }
+
+                        // 如果在同一文件且当前行在变量声明行之前，跳过该变量
+                        if (same_file && current_line < var_decl_line) {
+                            const char* var_name = sb_value.GetName();
+                            LOG_INFO("  Skipping variable '" +
+                                std::string(var_name ? var_name : "unnamed") +
+                                "' - declared at line " + std::to_string(var_decl_line) +
+                                ", current line " + std::to_string(current_line) +
+                                " (not yet in scope)");
+                            continue;
+                        }
+                    }
+                }
             }
 
             try {
