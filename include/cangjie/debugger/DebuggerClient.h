@@ -109,6 +109,16 @@ public:
         const std::optional<uint64_t> hash = std::nullopt
     ) const;
 
+    bool SendCommandCompletionResponse(
+        bool success,
+        const std::vector<std::string>& completions,
+        const std::string& common_prefix,
+        uint32_t completion_start,
+        bool has_more,
+        const std::string& error_message = "",
+        const std::optional<uint64_t> hash = std::nullopt
+    ) const;
+
 
 
 
@@ -381,6 +391,7 @@ private:
     // Request Handlers - Console and Commands
     // ============================================================================
     bool HandleExecuteCommandRequest(const lldbprotobuf::ExecuteCommandRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
+    bool HandleCommandCompletionRequest(const lldbprotobuf::CommandCompletionRequest& req, const std::optional<uint64_t> hash = std::nullopt) const;
 
 
     // ============================================================================

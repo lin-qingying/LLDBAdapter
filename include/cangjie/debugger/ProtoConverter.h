@@ -492,6 +492,24 @@ namespace Cangjie {
                 const std::string &error_output = "",
                 int32_t return_status = 0,
                 const std::string &error_message = "");
+
+            /**
+             * @brief 创建命令补全响应
+             *
+             * @param success 命令补全是否成功
+             * @param completions 补全候选列表
+             * @param common_prefix 所有补全的共同前缀
+             * @param completion_start 补全插入的起始位置
+             * @param has_more 是否还有更多补全结果
+             * @param error_message 错误消息（失败时）
+             */
+            static lldbprotobuf::CommandCompletionResponse CreateCommandCompletionResponse(
+                bool success,
+                const std::vector<std::string> &completions = {},
+                const std::string &common_prefix = "",
+                uint32_t completion_start = 0,
+                bool has_more = false,
+                const std::string &error_message = "");
         };
     } // namespace Debugger
 } // namespace Cangjie

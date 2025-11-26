@@ -1749,5 +1749,36 @@ namespace Cangjie {
 
             return response;
         }
+
+        lldbprotobuf::CommandCompletionResponse ProtoConverter::CreateCommandCompletionResponse(
+            bool success,
+            const std::vector<std::string> &completions,
+            const std::string &common_prefix,
+            uint32_t completion_start,
+            bool has_more,
+            const std::string &error_message) {
+            lldbprotobuf::CommandCompletionResponse response;
+
+            // 设置操作状态
+            *response.mutable_status() = CreateResponseStatus(success, error_message);
+
+            // 设置补全候选列表
+            if (success) {
+                for (const auto &completion : completions) {
+                    response.add_completions(completion);
+                }
+
+                // 设置共同前缀
+                response.set_common_prefix(common_prefix);
+
+                // 设置补全起始位置
+                response.set_completion_start(completion_start);
+
+                // 设置是否还有更多结果
+                response.set_has_more(has_more);
+            }
+
+            return response;
+        }
     } // namespace Debugger
 } // namespace Cangjie

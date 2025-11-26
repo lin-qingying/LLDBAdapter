@@ -498,6 +498,9 @@ namespace Cangjie::Debugger {
     if (request.has_execute_command()) {
         return HandleExecuteCommandRequest(request.execute_command(), request.hash());
     }
+    if (request.has_command_completion()) {
+        return HandleCommandCompletionRequest(request.command_completion(), request.hash());
+    }
 
 
 
@@ -3921,6 +3924,158 @@ namespace Cangjie::Debugger {
             success ? "" : "Command execution failed",
             hash
         );
+    }
+
+    bool DebuggerClient::HandleCommandCompletionRequest(const lldbprotobuf::CommandCompletionRequest &req,
+                                                         const std::optional<uint64_t> hash) const {
+        LOG_INFO("Handling CommandCompletion request: partial_command='" + req.partial_command() + "'" +
+            ", cursor_position=" + std::to_string(req.cursor_position()) +
+            ", max_results=" + std::to_string(req.max_results()));
+
+        // 验证 LLDB 是否已初始化
+        if (!InitializeLLDB()) {
+            LOG_ERROR("Failed to initialize LLDB for command completion");
+            return SendCommandCompletionResponse(false, {}, "", 0, false, "LLDB not available", hash);
+        }
+
+        // 获取命令解释器
+        lldb::SBCommandInterpreter interpreter = debugger_.GetCommandInterpreter();
+        if (!interpreter.IsValid()) {
+            LOG_ERROR("Failed to get command interpreter");
+            return SendCommandCompletionResponse(false, {}, "", 0, false, "Failed to get command interpreter", hash);
+        }
+
+        try {
+            // 获取要补全的部分命令
+            const std::string& partial_command = req.partial_command();
+            int cursor_pos = static_cast<int>(req.cursor_position());
+
+            // 如果游标位置无效，使用命令末尾位置
+            if (cursor_pos < 0 || cursor_pos > static_cast<int>(partial_command.length())) {
+                cursor_pos = static_cast<int>(partial_command.length());
+            }
+
+            // 存储补全结果的容器
+            lldb::SBStringList matches;
+            lldb::SBStringList descriptions;
+
+            // 使用LLDB API获取命令补全
+            // HandleCompletionWithDescriptions 返回补全结果的数量
+            int num_completions = interpreter.HandleCompletionWithDescriptions(
+                partial_command.c_str(),
+                cursor_pos,
+                0,  // match_start_point (输出参数，但我们不直接使用)
+                req.max_results() > 0 ? static_cast<int>(req.max_results()) : -1,  // max_return_elements
+                matches,
+                descriptions
+            );
+
+            if (num_completions < 0) {
+                LOG_WARNING("Command completion returned negative count: " + std::to_string(num_completions));
+                return SendCommandCompletionResponse(false, {}, "", 0, false, "Command completion failed", hash);
+            }
+
+            LOG_INFO("LLDB returned " + std::to_string(num_completions) + " completion candidates");
+
+            // 提取补全结果到vector
+            std::vector<std::string> completions;
+            size_t matches_count = matches.GetSize();
+
+            for (size_t i = 0; i < matches_count; ++i) {
+                const char* match = matches.GetStringAtIndex(i);
+                if (match && strlen(match) > 0) {
+                    completions.push_back(match);
+                }
+            }
+
+            // 计算共同前缀
+            std::string common_prefix;
+            if (!completions.empty()) {
+                common_prefix = completions[0];
+
+                for (size_t i = 1; i < completions.size() && !common_prefix.empty(); ++i) {
+                    size_t j = 0;
+                    while (j < common_prefix.length() &&
+                           j < completions[i].length() &&
+                           common_prefix[j] == completions[i][j]) {
+                        ++j;
+                    }
+                    common_prefix = common_prefix.substr(0, j);
+                }
+            }
+
+            // 确定补全起始位置
+            // LLDB 通常会在游标位置之前的单词边界开始补全
+            uint32_t completion_start = cursor_pos;
+
+            // 向后查找单词边界
+            while (completion_start > 0 &&
+                   !std::isspace(partial_command[completion_start - 1])) {
+                --completion_start;
+            }
+
+            // 检查是否还有更多结果（如果设置了最大结果数）
+            bool has_more = false;
+            if (req.max_results() > 0 && completions.size() >= req.max_results()) {
+                has_more = true;
+            }
+
+            LOG_INFO("Command completion successful: " + std::to_string(completions.size()) + " results" +
+                ", common_prefix='" + common_prefix + "'" +
+                ", completion_start=" + std::to_string(completion_start) +
+                ", has_more=" + std::to_string(has_more));
+
+            // 发送响应
+            return SendCommandCompletionResponse(
+                true,
+                completions,
+                common_prefix,
+                completion_start,
+                has_more,
+                "",
+                hash
+            );
+        } catch (const std::exception &e) {
+            LOG_ERROR("Exception during command completion: " + std::string(e.what()));
+            return SendCommandCompletionResponse(false, {}, "", 0, false,
+                                                "Exception during command completion: " + std::string(e.what()), hash);
+        } catch (...) {
+            LOG_ERROR("Unknown exception during command completion");
+            return SendCommandCompletionResponse(false, {}, "", 0, false, "Unknown exception during command completion", hash);
+        }
+    }
+
+    bool DebuggerClient::SendCommandCompletionResponse(bool success,
+                                                        const std::vector<std::string> &completions,
+                                                        const std::string &common_prefix,
+                                                        uint32_t completion_start,
+                                                        bool has_more,
+                                                        const std::string &error_message,
+                                                        const std::optional<uint64_t> hash) const {
+        // 使用 ProtoConverter 创建响应消息
+        auto completion_resp = ProtoConverter::CreateCommandCompletionResponse(
+            success,
+            completions,
+            common_prefix,
+            completion_start,
+            has_more,
+            error_message
+        );
+
+        // 创建完整响应
+        lldbprotobuf::Response response;
+        if (hash.has_value()) {
+            *response.mutable_hash() = CreateHashId(hash.value());
+        }
+        *response.mutable_command_completion() = completion_resp;
+
+        LOG_INFO("Sending CommandCompletion response: success=" + std::to_string(success) +
+            ", completions=" + std::to_string(completions.size()) +
+            ", common_prefix='" + common_prefix + "'" +
+            ", completion_start=" + std::to_string(completion_start) +
+            ", has_more=" + std::to_string(has_more));
+
+        return tcp_client_.SendProtoMessage(response);
     }
 
     // ============================================================================
