@@ -140,7 +140,7 @@ namespace Cangjie::Debugger {
         // ============================================
         // 4. 配置启动标志
         // ============================================
-        uint32_t launch_flags = 0 | lldb::eLaunchFlagDisableSTDIO;
+        uint32_t launch_flags = 0 /*| lldb::eLaunchFlagDisableSTDIO*/;
 
         LOG_INFO("  Stop at entry: NO (no breakpoints, process will run freely)");
 
@@ -172,8 +172,10 @@ namespace Cangjie::Debugger {
 
 
         // 可选：禁用 ASLR（地址空间布局随机化），便于调试
+if (launch_info.disable_aslr()) {
+    launch_flags |= lldb::eLaunchFlagDisableASLR;
 
-        launch_flags |= lldb::eLaunchFlagDisableASLR;
+}
 
         lldb_launch_info.SetLaunchFlags(launch_flags);
 

@@ -590,6 +590,8 @@ message ProcessLaunchInfo {
   // 标准错误重定向路径
   // LLDB API: SBLaunchInfo::SetStandardErrorPath()
   string stderr_path = 7;
+
+  bool disable_aslr=8;
 }
 
 
