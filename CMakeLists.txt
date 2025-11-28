@@ -453,6 +453,11 @@ set(UTILS_SOURCES
 set(CLIENT_SOURCES
         src/client/TcpClient.cpp
         src/client/DebuggerClient.cpp
+        src/client/DebuggerClientHandlers.cpp
+        src/client/DebuggerClientResponse.cpp
+        src/client/DebuggerClientUtils.cpp
+        src/client/TcpClient.cpp
+        src/client/DebuggerClientEvents.cpp
 )
 
 # Collect all sources (now including protobuf sources)
@@ -462,7 +467,7 @@ set(ALL_SOURCES
         ${UTILS_SOURCES}
         ${CLIENT_SOURCES}
         ${ALL_PROTO_SRCS}
-        src/client/TcpClient.cpp
+
 )
 
 # Create single executable: CangJieLLDBFrontend
@@ -509,6 +514,7 @@ endif()
 # Add Windows-specific libraries if needed
 if(WIN32)
     target_link_libraries(CangJieLLDBFrontend
+            kernel32     # For ConPTY functions (CreatePseudoConsole, etc.)
             dbghelp      # For symbolization functions like SymInitialize, SymFromAddr
             psapi        # For process API functions
             wsock32      # For socket functions

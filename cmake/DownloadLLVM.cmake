@@ -2,7 +2,7 @@
 
 function(download_llvm)
     set(LLVM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/llvm-project)
-    set(LLVM_REPO_URL "https://gitcode.com/openharmony/third_party_llvm-project.git")
+    set(LLVM_REPO_URL "https://gitcode.com/Cangjie/llvm-project.git")
 
     message(STATUS "Checking for LLVM/LLDB...")
 

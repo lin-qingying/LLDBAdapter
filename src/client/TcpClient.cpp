@@ -101,11 +101,13 @@ bool TcpClient::Connect(const std::string& host, int port) {
 #ifdef _WIN32
     socket_ = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_ == INVALID_SOCKET) {
+        int err = WSAGetLastError();
+        LOG_ERROR("Failed to create socket, WSA error: " + std::to_string(err));
 #else
     socket_ = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_ < 0) {
+        LOG_ERROR("Failed to create socket, errno: " + std::to_string(errno));
 #endif
-        LOG_ERROR("Failed to create socket");
 #ifdef _WIN32
         WSACleanup();
         wsa_initialized_ = false;

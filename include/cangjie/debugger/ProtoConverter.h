@@ -103,12 +103,6 @@ namespace Cangjie {
 
 
             /**
-             * @brief 创建进程停止事件
-             */
-            static lldbprotobuf::ProcessStopped CreateProcessStopped(lldb::SBThread &stopped_thread,
-                                                                     lldb::SBFrame &current_frame);
-
-            /**
              * @brief 创建线程信息
              */
             static lldbprotobuf::Thread CreateThread(lldb::SBThread &sb_thread);
@@ -261,13 +255,43 @@ namespace Cangjie {
             // 事件消息创建
             // ========================================================================
 
+            /**
+             * @brief 将 LLDB StateType 转换为 protobuf ProcessState
+             */
+            static lldbprotobuf::ProcessState ConvertProcessState(lldb::StateType state);
 
             /**
-             * @brief 创建进程退出事件
+             * @brief 创建进程状态变更事件（停止状态）
              */
-            static lldbprotobuf::ProcessExited CreateProcessExitedEvent(
-                int32_t exit_code,
+            static lldbprotobuf::ProcessStateChanged CreateProcessStateChangedStopped(
+                lldb::StateType state,
+                const std::string &description,
+                lldb::SBThread &stopped_thread,
+                lldb::SBFrame &current_frame);
+
+            /**
+             * @brief 创建进程状态变更事件（运行状态）
+             */
+            static lldbprotobuf::ProcessStateChanged CreateProcessStateChangedRunning(
+                lldb::StateType state,
+                const std::string &description,
+                int64_t thread_id = 0);
+
+            /**
+             * @brief 创建进程状态变更事件（退出状态）
+             */
+            static lldbprotobuf::ProcessStateChanged CreateProcessStateChangedExited(
+                lldb::StateType state,
+                const std::string &description,
+                int32_t exit_code = 0,
                 const std::string &exit_description = "");
+
+            /**
+             * @brief 创建进程状态变更事件（无详情状态）
+             */
+            static lldbprotobuf::ProcessStateChanged CreateProcessStateChangedSimple(
+                lldb::StateType state,
+                const std::string &description);
 
             static lldbprotobuf::Initialized CreateInitializedEvent(uint64_t uint64);
 

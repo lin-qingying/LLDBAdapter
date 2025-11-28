@@ -452,19 +452,6 @@ namespace Cangjie {
             }
         }
 
-        lldbprotobuf::ProcessStopped ProtoConverter::CreateProcessStopped(lldb::SBThread &stopped_thread,
-                                                                          lldb::SBFrame &current_frame) {
-            lldbprotobuf::ProcessStopped process_stopped;
-
-            // 使用 CreateThread 方法从 SBThread 创建 protobuf Thread
-            *process_stopped.mutable_stopped_thread() = CreateThread(stopped_thread);
-
-            // 使用 CreateFrame 方法从 SBFrame 创建 protobuf Frame
-            *process_stopped.mutable_current_frame() = CreateFrame(current_frame);
-
-            return process_stopped;
-        }
-
         lldbprotobuf::Thread ProtoConverter::CreateThread(lldb::SBThread &sb_thread) {
             // 创建 protobuf Thread 对象
             lldbprotobuf::Thread thread;
@@ -920,13 +907,104 @@ namespace Cangjie {
             return response;
         }
 
-        lldbprotobuf::ProcessExited ProtoConverter::CreateProcessExitedEvent(int32_t exit_code,
-                                                                             const std::string &exit_description) {
-            lldbprotobuf::ProcessExited event;
-            event.set_exit_code(exit_code);
-            if (!exit_description.empty()) {
-                event.set_exit_description(exit_description);
+        // ========================================================================
+        // 进程状态变更事件创建
+        // ========================================================================
+
+        lldbprotobuf::ProcessState ProtoConverter::ConvertProcessState(lldb::StateType state) {
+            switch (state) {
+                case lldb::eStateInvalid:
+                    return lldbprotobuf::PROCESS_STATE_INVALID;
+                case lldb::eStateUnloaded:
+                    return lldbprotobuf::PROCESS_STATE_UNLOADED;
+                case lldb::eStateConnected:
+                    return lldbprotobuf::PROCESS_STATE_CONNECTED;
+                case lldb::eStateAttaching:
+                    return lldbprotobuf::PROCESS_STATE_ATTACHING;
+                case lldb::eStateLaunching:
+                    return lldbprotobuf::PROCESS_STATE_LAUNCHING;
+                case lldb::eStateStopped:
+                    return lldbprotobuf::PROCESS_STATE_STOPPED;
+                case lldb::eStateRunning:
+                    return lldbprotobuf::PROCESS_STATE_RUNNING;
+                case lldb::eStateStepping:
+                    return lldbprotobuf::PROCESS_STATE_STEPPING;
+                case lldb::eStateCrashed:
+                    return lldbprotobuf::PROCESS_STATE_CRASHED;
+                case lldb::eStateDetached:
+                    return lldbprotobuf::PROCESS_STATE_DETACHED;
+                case lldb::eStateExited:
+                    return lldbprotobuf::PROCESS_STATE_EXITED;
+                case lldb::eStateSuspended:
+                    return lldbprotobuf::PROCESS_STATE_SUSPENDED;
+                default:
+                    return lldbprotobuf::PROCESS_STATE_INVALID;
             }
+        }
+
+        lldbprotobuf::ProcessStateChanged ProtoConverter::CreateProcessStateChangedStopped(
+            lldb::StateType state,
+            const std::string &description,
+            lldb::SBThread &stopped_thread,
+            lldb::SBFrame &current_frame) {
+
+            lldbprotobuf::ProcessStateChanged event;
+            event.set_state(ConvertProcessState(state));
+            event.set_description(description);
+
+            // 填充停止详情
+            auto* stopped_details = event.mutable_stopped_details();
+            *stopped_details->mutable_stopped_thread() = CreateThread(stopped_thread);
+            *stopped_details->mutable_current_frame() = CreateFrame(current_frame);
+
+            return event;
+        }
+
+        lldbprotobuf::ProcessStateChanged ProtoConverter::CreateProcessStateChangedRunning(
+            lldb::StateType state,
+            const std::string &description,
+            int64_t thread_id) {
+
+            lldbprotobuf::ProcessStateChanged event;
+            event.set_state(ConvertProcessState(state));
+            event.set_description(description);
+
+            // 填充运行详情
+            auto* running_details = event.mutable_running_details();
+            running_details->set_thread_id(thread_id);
+
+            return event;
+        }
+
+        lldbprotobuf::ProcessStateChanged ProtoConverter::CreateProcessStateChangedExited(
+            lldb::StateType state,
+            const std::string &description,
+            int32_t exit_code,
+            const std::string &exit_description) {
+
+            lldbprotobuf::ProcessStateChanged event;
+            event.set_state(ConvertProcessState(state));
+            event.set_description(description);
+
+            // 填充退出详情
+            auto* exited_details = event.mutable_exited_details();
+            exited_details->set_exit_code(exit_code);
+            if (!exit_description.empty()) {
+                exited_details->set_description(exit_description);
+            }
+
+            return event;
+        }
+
+        lldbprotobuf::ProcessStateChanged ProtoConverter::CreateProcessStateChangedSimple(
+            lldb::StateType state,
+            const std::string &description) {
+
+            lldbprotobuf::ProcessStateChanged event;
+            event.set_state(ConvertProcessState(state));
+            event.set_description(description);
+            // 不填充任何详情，oneof 为空
+
             return event;
         }
 

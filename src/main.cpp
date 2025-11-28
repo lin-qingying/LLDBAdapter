@@ -10,8 +10,16 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <io.h>
+#include <stdio.h>
 
 int main(int argc, char** argv) {
+    // 检查适配器自己的 stdout 是不是终端
+    int result = _isatty(_fileno(stdout));
+    printf("Adapter stdout isatty: %d\n", result);  // 0 = 管道，1 = 终端
+
+
+
     Cangjie::Debugger::Logger::Initialize("cangjie_debugger.log", Cangjie::Debugger::LogLevel::INFO, true);
     LOG_INFO("CangJie LLDB Frontend starting...");
 
