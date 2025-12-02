@@ -236,10 +236,9 @@ jobs:
       - name: Configure CMake
         shell: pwsh
         run: |
-          cmake -B build `
-            -G Ninja `
-            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd64.cmake `
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
+          cmake -B build -G Ninja `
+            -DCMAKE_TOOLCHAIN_FILE="cmake/toolchains/windows-amd64.cmake" `
+            -DCMAKE_BUILD_TYPE="${{ env.BUILD_TYPE }}" `
             -DCMAKE_C_COMPILER=clang `
             -DCMAKE_CXX_COMPILER=clang++ `
             -DCMAKE_C_COMPILER_LAUNCHER=ccache `
