@@ -47,11 +47,6 @@ namespace Cangjie::Debugger {
         // 确保进程被强制终止
         EnsureProcessTerminated();
 
-#ifdef _WIN32
-        // Cleanup ConPTY resources if they were created
-        CleanupConPty();
-#endif
-
         // 停止事件监听线程
         StopEventThread();
 

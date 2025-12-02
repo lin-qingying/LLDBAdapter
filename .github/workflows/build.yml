@@ -280,80 +280,80 @@ jobs:
           retention-days: 7
 
   # ============== macOS AMD64 ==============
-  build-macos-amd64:
-    runs-on: macos-13  # Intel Mac
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup CMake
-        uses: lukka/get-cmake@latest
-
-      - name: Install dependencies
-        run: |
-          brew install llvm ccache || true
-
-      - name: Cache protobuf build
-        uses: actions/cache@v4
-        with:
-          path: |
-            build/third_party/protobuf-build
-            build/third_party/protobuf-install
-          key: ${{ runner.os }}-amd64-protobuf-${{ hashFiles('third_party/protobuf/**') }}
-          restore-keys: |
-            ${{ runner.os }}-amd64-protobuf-
-
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/ccache
-          key: ${{ runner.os }}-amd64-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-amd64-ccache-
-
-      - name: Configure CMake
-        run: |
-          export PATH="$(brew --prefix)/opt/ccache/libexec:$PATH"
-          cmake -B build \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/macos-amd64.cmake \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-
-      - name: Build
-        run: |
-          export PATH="$(brew --prefix)/opt/ccache/libexec:$PATH"
-          cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
-
-      - name: Strip binary
-        run: |
-          if [ -f "build/output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
-            strip build/output/${{ env.PROJECT_NAME }}_macos_amd64
-          elif [ -f "output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
-            strip output/${{ env.PROJECT_NAME }}_macos_amd64
-          fi
-
-      - name: Rename binary
-        run: |
-          if [ -f "build/output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
-            cp build/output/${{ env.PROJECT_NAME }}_macos_amd64 ${{ env.PROJECT_NAME }}_macos_amd64
-          elif [ -f "output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
-            cp output/${{ env.PROJECT_NAME }}_macos_amd64 ${{ env.PROJECT_NAME }}_macos_amd64
-          else
-            echo "Error: Binary not found"
-            ls -la build/output/ || ls -la output/ || true
-            exit 1
-          fi
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-amd64
-          path: ${{ env.PROJECT_NAME }}_macos_amd64
-          retention-days: 7
+#  build-macos-amd64:
+#    runs-on: macos-13  # Intel Mac
+#
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v4
+#        with:
+#          submodules: recursive
+#
+#      - name: Setup CMake
+#        uses: lukka/get-cmake@latest
+#
+#      - name: Install dependencies
+#        run: |
+#          brew install llvm ccache || true
+#
+#      - name: Cache protobuf build
+#        uses: actions/cache@v4
+#        with:
+#          path: |
+#            build/third_party/protobuf-build
+#            build/third_party/protobuf-install
+#          key: ${{ runner.os }}-amd64-protobuf-${{ hashFiles('third_party/protobuf/**') }}
+#          restore-keys: |
+#            ${{ runner.os }}-amd64-protobuf-
+#
+#      - name: Cache ccache
+#        uses: actions/cache@v4
+#        with:
+#          path: ~/Library/Caches/ccache
+#          key: ${{ runner.os }}-amd64-ccache-${{ github.sha }}
+#          restore-keys: |
+#            ${{ runner.os }}-amd64-ccache-
+#
+#      - name: Configure CMake
+#        run: |
+#          export PATH="$(brew --prefix)/opt/ccache/libexec:$PATH"
+#          cmake -B build \
+#            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/macos-amd64.cmake \
+#            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+#            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+#            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+#
+#      - name: Build
+#        run: |
+#          export PATH="$(brew --prefix)/opt/ccache/libexec:$PATH"
+#          cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
+#
+#      - name: Strip binary
+#        run: |
+#          if [ -f "build/output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
+#            strip build/output/${{ env.PROJECT_NAME }}_macos_amd64
+#          elif [ -f "output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
+#            strip output/${{ env.PROJECT_NAME }}_macos_amd64
+#          fi
+#
+#      - name: Rename binary
+#        run: |
+#          if [ -f "build/output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
+#            cp build/output/${{ env.PROJECT_NAME }}_macos_amd64 ${{ env.PROJECT_NAME }}_macos_amd64
+#          elif [ -f "output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
+#            cp output/${{ env.PROJECT_NAME }}_macos_amd64 ${{ env.PROJECT_NAME }}_macos_amd64
+#          else
+#            echo "Error: Binary not found"
+#            ls -la build/output/ || ls -la output/ || true
+#            exit 1
+#          fi
+#
+#      - name: Upload artifact
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: macos-amd64
+#          path: ${{ env.PROJECT_NAME }}_macos_amd64
+#          retention-days: 7
 
   # ============== macOS ARM64 ==============
   build-macos-arm64:
@@ -433,7 +433,8 @@ jobs:
 
   # ============== Create Release ==============
   create-release:
-    needs: [build-windows-amd64,build-linux-amd64, build-linux-arm64,  build-macos-amd64, build-macos-arm64]
+#    build-macos-amd64,
+    needs: [build-windows-amd64,build-linux-amd64, build-linux-arm64,  build-macos-arm64 ]
     runs-on: ubuntu-22.04
     if: startsWith(github.ref, 'refs/tags/v')
 

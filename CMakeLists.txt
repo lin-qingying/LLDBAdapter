@@ -566,25 +566,39 @@ if(WIN32)
     )
 endif()
 
-# LLDB 动态链接配置
+# LLDB 动态链接配置 - 根据平台和架构使用不同的库文件
 if(WIN32)
-    # Windows 平台：使用 liblldb.dll
-    target_link_libraries(${EXECUTABLE_NAME}
-            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/liblldb.dll
+    # Windows 平台：使用 liblldb_windows_<arch>.dll
+    set(LLDB_LIB_NAME "liblldb_${CANGJIE_OUTPUT_SUFFIX}.dll")
+    set(LLDB_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/${LLDB_LIB_NAME}")
 
+    message(STATUS "Windows LLDB library: ${LLDB_LIB_PATH}")
+
+    target_link_libraries(${EXECUTABLE_NAME}
+            ${LLDB_LIB_PATH}
             psapi
             ws2_32
             wsock32
     )
 elseif(APPLE)
-    # macOS 平台：使用 liblldb.dylib
+    # macOS 平台：使用 liblldb_macos_<arch>.dylib
+    set(LLDB_LIB_NAME "liblldb_${CANGJIE_OUTPUT_SUFFIX}.dylib")
+    set(LLDB_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/${LLDB_LIB_NAME}")
+
+    message(STATUS "macOS LLDB library: ${LLDB_LIB_PATH}")
+
     target_link_libraries(${EXECUTABLE_NAME}
-            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/liblldb.dylib
+            ${LLDB_LIB_PATH}
     )
 else()
-    # Linux 平台：使用 liblldb.so
+    # Linux 平台：使用 liblldb_linux_<arch>.so
+    set(LLDB_LIB_NAME "liblldb_${CANGJIE_OUTPUT_SUFFIX}.so")
+    set(LLDB_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/${LLDB_LIB_NAME}")
+
+    message(STATUS "Linux LLDB library: ${LLDB_LIB_PATH}")
+
     target_link_libraries(${EXECUTABLE_NAME}
-            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/liblldb.so
+            ${LLDB_LIB_PATH}
     )
 endif()
 
@@ -668,9 +682,9 @@ if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     # 运行时库 DLLs（liblldb.dll等第三方DLL所需）
     # 注意：主程序不需要这些，但第三方DLL需要
     set(RUNTIME_DLLS
-            libstdc++-6.dll      # liblldb.dll 和其他第三方DLL依赖
-            libgcc_s_seh-1.dll   # liblldb.dll 和其他第三方DLL依赖
-            libwinpthread-1.dll  # liblldb.dll 和其他第三方DLL依赖
+            libstdc++-6.dll      # liblldb_windows_amd64.dll 和其他第三方DLL依赖
+            libgcc_s_seh-1.dll   # liblldb_windows_amd64.dll 和其他第三方DLL依赖
+            libwinpthread-1.dll  # liblldb_windows_amd64.dll 和其他第三方DLL依赖
             libssp-0.dll         # 可能被某些第三方DLL依赖
     )
 
