@@ -219,9 +219,9 @@ jobs:
           path: |
             build/third_party/protobuf-build
             build/third_party/protobuf-install
-          key: ${{ runner.os }}-protobuf-${{ hashFiles('third_party/protobuf/**') }}
+          key: ${{ runner.os }}-llvm-mingw-libc++-protobuf-${{ hashFiles('third_party/protobuf/**') }}
           restore-keys: |
-            ${{ runner.os }}-protobuf-
+            ${{ runner.os }}-llvm-mingw-libc++-protobuf-
 
       - name: Verify tools
         shell: pwsh

@@ -44,11 +44,32 @@ function(build_protobuf)
         # 配置 protobuf 构建
         message(STATUS "配置 Protobuf 构建...")
         message(STATUS "  这可能需要一些时间，请耐心等待...")
+
+        # 为 Windows 设置额外的编译标志以确保兼容性
+        set(EXTRA_CMAKE_FLAGS "")
+        if(WIN32)
+            list(APPEND EXTRA_CMAKE_FLAGS
+                "-DCMAKE_C_FLAGS=-D_WIN32_WINNT=0x0601"
+                "-DCMAKE_CXX_FLAGS=-D_WIN32_WINNT=0x0601"
+            )
+            message(STATUS "  添加 Windows 兼容性标志: _WIN32_WINNT=0x0601 (Windows 7+)")
+
+            # 如果使用 Clang，确保 protobuf 也使用 libc++
+            if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+                list(APPEND EXTRA_CMAKE_FLAGS
+                    "-DCMAKE_CXX_FLAGS=-D_WIN32_WINNT=0x0601 -stdlib=libc++"
+                )
+                message(STATUS "  使用 libc++ 标准库以匹配主程序")
+            endif()
+        endif()
+
         execute_process(
             COMMAND ${CMAKE_COMMAND} -G ${CMAKE_GENERATOR}
                 -DCMAKE_INSTALL_PREFIX=${PROTOBUF_INSTALL_DIR}
                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                 -DCMAKE_CXX_STANDARD=17
+                -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                 -Dprotobuf_BUILD_TESTS=OFF
                 -Dprotobuf_BUILD_EXAMPLES=OFF
                 -Dprotobuf_BUILD_PROTOC_BINARIES=ON
@@ -56,6 +77,7 @@ function(build_protobuf)
                 -Dprotobuf_WITH_ZLIB=OFF
                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                 -Dprotobuf_INSTALL=ON
+                ${EXTRA_CMAKE_FLAGS}
                 ${PROTOBUF_SOURCE_DIR}
             WORKING_DIRECTORY ${PROTOBUF_BUILD_DIR}
             RESULT_VARIABLE PROTOBUF_CONFIGURE_RESULT
