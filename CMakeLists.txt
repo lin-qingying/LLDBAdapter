@@ -570,7 +570,7 @@ endif()
 if(WIN32)
     target_link_libraries(${EXECUTABLE_NAME}
             ${CMAKE_CURRENT_SOURCE_DIR}/third_party/liblldb.dll
-            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libclang.dll
+#            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libclang.dll
             psapi
             ws2_32
             wsock32
