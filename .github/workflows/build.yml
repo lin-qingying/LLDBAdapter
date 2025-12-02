@@ -101,9 +101,9 @@ jobs:
           path: ${{ env.PROJECT_NAME }}_linux_amd64
           retention-days: 7
 
-  # ============== Linux ARM64 ==============
+  # ============== Linux ARM64 (原生构建) ==============
   build-linux-arm64:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-arm64
 
     steps:
       - name: Checkout code
@@ -114,18 +114,15 @@ jobs:
       - name: Setup CMake
         uses: lukka/get-cmake@latest
 
-      - name: Install ARM64 cross-compile tools
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu \
+            gcc \
+            g++ \
             ninja-build \
-            ccache \
-            protobuf-compiler \
-            libprotobuf-dev
+            ccache
 
       - name: Cache protobuf build
         uses: actions/cache@v4
@@ -145,7 +142,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-arm64-ccache-
 
-      - name: Configure CMake (Cross-compile)
+      - name: Configure CMake
         run: |
           export PATH="/usr/lib/ccache:$PATH"
           cmake -B build \
@@ -163,9 +160,9 @@ jobs:
       - name: Strip binary
         run: |
           if [ -f "build/output/${{ env.PROJECT_NAME }}_linux_arm64" ]; then
-            aarch64-linux-gnu-strip build/output/${{ env.PROJECT_NAME }}_linux_arm64
+            strip build/output/${{ env.PROJECT_NAME }}_linux_arm64
           elif [ -f "output/${{ env.PROJECT_NAME }}_linux_arm64" ]; then
-            aarch64-linux-gnu-strip output/${{ env.PROJECT_NAME }}_linux_arm64
+            strip output/${{ env.PROJECT_NAME }}_linux_arm64
           fi
 
       - name: Rename binary
