@@ -14,11 +14,11 @@
 #   sudo apt-get install build-essential gcc g++ ninja-build
 #
 # 使用此工具链：
-#   cmake -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/linux-amd64.cmake ..
+#   cmake -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/linux-amd64.cmake ..
 #   cmake --build . --parallel
 #
 # 使用 Ninja（推荐）：
-#   cmake -GNinja -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/linux-amd64.cmake ..
+#   cmake -GNinja -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/linux-amd64.cmake ..
 #   ninja
 # ============================================
 

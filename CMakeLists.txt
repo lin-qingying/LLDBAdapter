@@ -84,18 +84,29 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # ============================================
-# Protobuf 配置（使用 BuildProtobuf 模块）
+# Protobuf 配置（支持交叉编译）
 # ============================================
-# 包含 Protobuf 构建模块
-include(BuildProtobuf)
+# 检查是否为交叉编译模式
+if(CMAKE_CROSSCOMPILING AND DEFINED PROTOC_HOST)
+    # 交叉编译模式：使用宿主机 protoc 和目标平台 protobuf 库
+    message(STATUS "====================================")
+    message(STATUS "交叉编译模式")
+    message(STATUS "  使用宿主机 protoc: ${PROTOC_HOST}")
+    message(STATUS "  构建目标平台 protobuf 库")
+    message(STATUS "====================================")
 
-# 构建并配置 Protobuf（内部使用 find_package 提供 CMake targets 并在配置时生成 proto 文件）
-# 此函数会自动：
-#   1. 构建 protobuf（如果需要）
-#   2. 使用 find_package 找到 protobuf
-#   3. 在配置时立即生成 .proto 文件（使用 execute_process + protoc）
-#   4. 设置 ALL_PROTO_SRCS、ALL_PROTO_HDRS 和 GENERATED_PROTO_DIR 变量
-build_protobuf()
+    include(BuildProtobufTarget)
+    build_protobuf_target(${PROTOC_HOST})
+else()
+    # 本地编译模式：构建 protobuf 和 protoc
+    message(STATUS "====================================")
+    message(STATUS "本地编译模式")
+    message(STATUS "  构建 protobuf 和 protoc")
+    message(STATUS "====================================")
+
+    include(BuildProtobuf)
+    build_protobuf()
+endif()
 
 # 查找线程库
 find_package(Threads REQUIRED)

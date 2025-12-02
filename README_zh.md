@@ -222,7 +222,7 @@ cd cangjie_debugger
 # 2. 配置构建
 cmake -B build -G "Ninja" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/windows-amd64.cmake
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd64.cmake
 
 # 3. 构建项目
 cmake --build build --config Release
@@ -245,7 +245,7 @@ sudo apt-get install -y build-essential cmake ninja-build
 # 3. 配置构建
 cmake -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/linux-amd64.cmake
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/linux-amd64.cmake
 
 # 4. 构建项目
 cmake --build build
@@ -267,7 +267,7 @@ brew install cmake ninja llvm
 # 3. 配置构建
 cmake -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/macos-arm64.cmake
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/macos-arm64.cmake
 
 # 4. 构建项目
 cmake --build build
@@ -306,7 +306,7 @@ sudo apt-get install -y \
 # 2. 配置和构建
 cmake -B build-arm64 -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/linux-arm64.cmake
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/linux-arm64.cmake
 
 cmake --build build-arm64
 
@@ -318,7 +318,7 @@ cmake --build build-arm64
 
 ```bash
 cmake -B build \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/linux-arm64.cmake \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/linux-arm64.cmake \
   -DCMAKE_C_COMPILER=/custom/path/aarch64-linux-gnu-gcc \
   -DCMAKE_CXX_COMPILER=/custom/path/aarch64-linux-gnu-g++ \
   -DCMAKE_SYSROOT=/path/to/arm64/sysroot

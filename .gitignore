@@ -6,3 +6,5 @@
 /third_party/*.dylib
 /output/**
 /output/
+
+/cmake-build-*/

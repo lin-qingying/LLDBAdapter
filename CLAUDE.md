@@ -85,16 +85,67 @@ make
 
 ### Cross-Compilation for ARM Architectures
 
-The project provides toolchain files for cross-compiling from Linux AMD64 to ARM:
+The project provides toolchain files for cross-compiling from Linux AMD64 to ARM.
 
-#### ARM64 (aarch64) Cross-Compilation
+#### ARM64 (aarch64) Cross-Compilation - 自动化脚本（推荐）
+
+使用提供的自动化脚本进行两阶段交叉编译（先在宿主机编译 protobuf 和 protoc，然后使用宿主机的 protoc 编译 proto 文件，最后交叉编译项目）：
+
 ```bash
-# Install toolchain (Ubuntu/Debian)
+# 安装交叉编译工具链（Ubuntu/Debian）
 sudo apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
-# Configure and build
-mkdir build-arm64 && cd build-arm64
-cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm64.cmake ..
+# 赋予脚本执行权限
+chmod +x scripts/linux-amd64-to-arm64.sh
+
+# 运行自动化交叉编译脚本
+./scripts/linux-amd64-to-arm64.sh
+
+# 指定构建类型（默认为 Release）
+BUILD_TYPE=Debug ./scripts/linux-amd64-to-arm64.sh
+```
+
+脚本执行的三个阶段：
+1. **阶段 1**：在宿主机（Linux AMD64）使用系统 GCC 编译 protobuf 和 protoc 工具
+2. **阶段 2**：使用宿主机的 protoc 生成 C++ 代码（`.pb.cc` 和 `.pb.h` 文件）
+3. **阶段 3**：使用 ARM64 交叉编译器编译整个项目
+
+**优点**：
+- 完全自动化，一键完成所有步骤
+- 避免交叉编译 protoc 的复杂性
+- 支持增量编译，已编译的部分会被跳过
+- 彩色输出，清晰显示编译进度
+- 自动验证生成的可执行文件架构
+- 自动使用系统 GCC (`/usr/bin/gcc`) 编译宿主机 protobuf
+- 支持使用 Ninja 构建系统加速编译
+
+**生成的构建目录**：
+- `build-linux-amd64/`: 宿主机构建目录（包含 protoc）
+- `build-linux-arm64/`: 目标平台构建目录
+- `output/`: 最终可执行文件输出目录
+
+#### ARM64 (aarch64) Cross-Compilation - 手动步骤
+
+如果需要手动控制每个步骤，可以使用以下方法：
+
+```bash
+# 1. 安装交叉编译工具链（Ubuntu/Debian）
+sudo apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+# 2. 先在宿主机编译 protobuf 和 protoc
+mkdir build-linux-amd64 && cd build-linux-amd64
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=/usr/bin/gcc \
+      -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+      ..
+cmake --build . --config Release --parallel
+cd ..
+
+# 3. 使用宿主机的 protoc 进行交叉编译
+mkdir build-linux-arm64 && cd build-linux-arm64
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/linux-arm64.cmake \
+      -DPROTOC_HOST=../build-linux-amd64/host/protobuf-install/bin/protoc \
+      ..
 cmake --build .
 ```
 

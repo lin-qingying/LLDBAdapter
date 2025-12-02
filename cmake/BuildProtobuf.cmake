@@ -69,8 +69,18 @@ function(build_protobuf)
         # 构建 protobuf
         message(STATUS "构建 Protobuf...")
         message(STATUS "  编译中，进度会实时显示...")
+
+        # 检测编译器类型，如果是 Clang 则限制并行数以避免链接器卡住
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            set(PARALLEL_JOBS 4)
+            message(STATUS "  检测到 Clang 编译器：限制并行编译数为 ${PARALLEL_JOBS} 以避免链接器卡住")
+        else()
+            set(PARALLEL_JOBS "")
+            message(STATUS "  使用默认并行编译数")
+        endif()
+
         execute_process(
-            COMMAND ${CMAKE_COMMAND} --build . --config ${CMAKE_BUILD_TYPE} --target install --parallel
+            COMMAND ${CMAKE_COMMAND} --build . --config ${CMAKE_BUILD_TYPE} --target install --parallel ${PARALLEL_JOBS}
             WORKING_DIRECTORY ${PROTOBUF_BUILD_DIR}
             RESULT_VARIABLE PROTOBUF_BUILD_RESULT
             # 移除 OUTPUT_VARIABLE 和 ERROR_VARIABLE 以显示实时输出
