@@ -32,16 +32,39 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential
+          sudo apt-get install -y build-essential ccache
+
+      - name: Cache protobuf build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/third_party/protobuf-build
+            build/third_party/protobuf-install
+          key: ${{ runner.os }}-protobuf-${{ hashFiles('third_party/protobuf/**') }}
+          restore-keys: |
+            ${{ runner.os }}-protobuf-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
 
       - name: Configure CMake
         run: |
+          export PATH="/usr/lib/ccache:$PATH"
           cmake -B build \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/linux-amd64.cmake \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
+        run: |
+          export PATH="/usr/lib/ccache:$PATH"
+          cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
 
       - name: Strip binary
         run: strip build/output/${{ env.PROJECT_NAME }} || strip output/${{ env.PROJECT_NAME }} || true
@@ -80,16 +103,40 @@ jobs:
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
             g++-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu
+            binutils-aarch64-linux-gnu \
+            ccache
+
+      - name: Cache protobuf build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/third_party/protobuf-build
+            build/third_party/protobuf-install
+          key: ${{ runner.os }}-arm64-protobuf-${{ hashFiles('third_party/protobuf/**') }}
+          restore-keys: |
+            ${{ runner.os }}-arm64-protobuf-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-arm64-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-arm64-ccache-
 
       - name: Configure CMake (Cross-compile)
         run: |
+          export PATH="/usr/lib/ccache:$PATH"
           cmake -B build \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/linux-arm64.cmake \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
+        run: |
+          export PATH="/usr/lib/ccache:$PATH"
+          cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
 
       - name: Strip binary
         run: aarch64-linux-gnu-strip build/output/${{ env.PROJECT_NAME }} || aarch64-linux-gnu-strip output/${{ env.PROJECT_NAME }} || true
@@ -131,19 +178,43 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
             make
+
+      - name: Cache protobuf build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/third_party/protobuf-build
+            build/third_party/protobuf-install
+          key: ${{ runner.os }}-protobuf-${{ hashFiles('third_party/protobuf/**') }}
+          restore-keys: |
+            ${{ runner.os }}-protobuf-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
 
       - name: Configure CMake
         shell: msys2 {0}
         run: |
+          export PATH="/mingw64/bin:$PATH"
           cmake -B build \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/windows-amd64.cmake \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -G "MinGW Makefiles"
 
       - name: Build
         shell: msys2 {0}
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
+        run: |
+          export PATH="/mingw64/bin:$PATH"
+          cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
 
       - name: Rename binary
         shell: pwsh
@@ -182,16 +253,39 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install llvm || true
+          brew install llvm ccache || true
+
+      - name: Cache protobuf build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/third_party/protobuf-build
+            build/third_party/protobuf-install
+          key: ${{ runner.os }}-amd64-protobuf-${{ hashFiles('third_party/protobuf/**') }}
+          restore-keys: |
+            ${{ runner.os }}-amd64-protobuf-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ${{ runner.os }}-amd64-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-amd64-ccache-
 
       - name: Configure CMake
         run: |
+          export PATH="$(brew --prefix)/opt/ccache/libexec:$PATH"
           cmake -B build \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/macos-amd64.cmake \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
+        run: |
+          export PATH="$(brew --prefix)/opt/ccache/libexec:$PATH"
+          cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
 
       - name: Strip binary
         run: strip build/output/${{ env.PROJECT_NAME }} || strip output/${{ env.PROJECT_NAME }} || true
@@ -226,16 +320,39 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install llvm || true
+          brew install llvm ccache || true
+
+      - name: Cache protobuf build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/third_party/protobuf-build
+            build/third_party/protobuf-install
+          key: ${{ runner.os }}-arm64-protobuf-${{ hashFiles('third_party/protobuf/**') }}
+          restore-keys: |
+            ${{ runner.os }}-arm64-protobuf-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ${{ runner.os }}-arm64-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-arm64-ccache-
 
       - name: Configure CMake
         run: |
+          export PATH="$(brew --prefix)/opt/ccache/libexec:$PATH"
           cmake -B build \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/macos-arm64.cmake \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
+        run: |
+          export PATH="$(brew --prefix)/opt/ccache/libexec:$PATH"
+          cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
 
       - name: Strip binary
         run: strip build/output/${{ env.PROJECT_NAME }} || strip output/${{ env.PROJECT_NAME }} || true
