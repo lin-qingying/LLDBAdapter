@@ -130,7 +130,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            build-linux-amd64/host
+            cmake-build-linux-amd64/third_party
           key: ${{ runner.os }}-host-protobuf-${{ hashFiles('third_party/protobuf/**') }}
           restore-keys: |
             ${{ runner.os }}-host-protobuf-
@@ -139,7 +139,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            build-linux-arm64/target
+            cmake-build-linux-arm64/third_party
           key: ${{ runner.os }}-arm64-protobuf-${{ hashFiles('third_party/protobuf/**') }}
           restore-keys: |
             ${{ runner.os }}-arm64-protobuf-

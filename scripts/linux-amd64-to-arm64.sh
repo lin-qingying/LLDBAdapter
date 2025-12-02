@@ -132,7 +132,7 @@ mkdir -p "${HOST_BUILD_DIR}"
 cd "${HOST_BUILD_DIR}"
 
 # 检查是否已经构建过
-PROTOC_HOST="${HOST_BUILD_DIR}/host/protobuf-install/bin/protoc"
+PROTOC_HOST="${HOST_BUILD_DIR}/third_party/protobuf-install/bin/protoc"
 if [ -f "${PROTOC_HOST}" ]; then
     print_info "检测到已存在的宿主机 protoc: ${PROTOC_HOST}"
     print_warn "跳过宿主机 protobuf 构建（如需重新构建，请删除 ${HOST_BUILD_DIR}）"
@@ -140,6 +140,7 @@ else
     print_info "配置宿主机构建环境..."
     print_info "  使用生成器: ${HOST_GENERATOR}"
     print_info "  使用编译器: ${HOST_CC} / ${HOST_CXX}"
+    print_info "  注意：Protobuf 会在配置阶段自动编译"
 
     cmake -G "${HOST_GENERATOR}" \
         -DCMAKE_BUILD_TYPE=Release \
@@ -147,8 +148,8 @@ else
         -DCMAKE_CXX_COMPILER="${HOST_CXX}" \
         "${PROJECT_ROOT}"
 
-    print_info "开始编译宿主机 Protobuf（这可能需要几分钟）..."
-    cmake --build . --config Release --parallel $(nproc)
+    # BuildProtobuf.cmake 已经在配置阶段编译了 protobuf
+    # 这里只是验证 protoc 是否成功生成
 
     if [ ! -f "${PROTOC_HOST}" ]; then
         print_error "宿主机 protoc 编译失败: ${PROTOC_HOST}"

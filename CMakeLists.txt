@@ -210,7 +210,7 @@ set_property(TARGET ${EXECUTABLE_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
 foreach(PROTO_SRC ${ALL_PROTO_SRCS})
     # 为 protobuf 生成文件添加警告抑制
     set_source_files_properties(${PROTO_SRC} PROPERTIES
-            COMPILE_OPTIONS "-Wno-sign-compare -Wno-unused-parameter"
+            COMPILE_OPTIONS "-Wno-sign-compare;-Wno-unused-parameter"
     )
 endforeach()
 

@@ -120,8 +120,9 @@ BUILD_TYPE=Debug ./scripts/linux-amd64-to-arm64.sh
 - 支持使用 Ninja 构建系统加速编译
 
 **生成的构建目录**：
-- `build-linux-amd64/`: 宿主机构建目录（包含 protoc）
-- `build-linux-arm64/`: 目标平台构建目录
+- `cmake-build-linux-amd64/`: 宿主机构建目录（包含 protoc）
+  - `third_party/protobuf-install/bin/protoc` - 宿主机 protoc 工具
+- `cmake-build-linux-arm64/`: 目标平台构建目录
 - `output/`: 最终可执行文件输出目录
 
 #### ARM64 (aarch64) Cross-Compilation - 手动步骤
@@ -133,18 +134,17 @@ BUILD_TYPE=Debug ./scripts/linux-amd64-to-arm64.sh
 sudo apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
 # 2. 先在宿主机编译 protobuf 和 protoc
-mkdir build-linux-amd64 && cd build-linux-amd64
+mkdir cmake-build-linux-amd64 && cd cmake-build-linux-amd64
 cmake -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_C_COMPILER=/usr/bin/gcc \
       -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
       ..
-cmake --build . --config Release --parallel
 cd ..
 
 # 3. 使用宿主机的 protoc 进行交叉编译
-mkdir build-linux-arm64 && cd build-linux-arm64
+mkdir cmake-build-linux-arm64 && cd cmake-build-linux-arm64
 cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/linux-arm64.cmake \
-      -DPROTOC_HOST=../build-linux-amd64/host/protobuf-install/bin/protoc \
+      -DPROTOC_HOST=../cmake-build-linux-amd64/third_party/protobuf-install/bin/protoc \
       ..
 cmake --build .
 ```
