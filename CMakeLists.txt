@@ -28,29 +28,22 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     endif()
     message(STATUS "================================")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # Clang: 使用不同的静态链接方式
-    if(WIN32)
-        # Windows Clang/LLVM: 使用 -static 链接器标志
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc")
-        message(STATUS "================================")
-        message(STATUS "Clang 静态链接配置 (Windows):")
-        message(STATUS "  - 使用 LLVM libc++ (静态链接)")
-        message(STATUS "  - protobuf 库静态链接 (.a)")
-        message(STATUS "================================")
-    elseif(APPLE)
+    # Clang: 静态链接标准C++库
+    if(APPLE)
         # macOS 默认使用 libc++
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
         message(STATUS "================================")
         message(STATUS "Clang 静态链接配置 (macOS):")
         message(STATUS "  - libc++ 将被静态链接")
         message(STATUS "  - protobuf 库静态链接 (.a)")
         message(STATUS "================================")
     else()
-        # Linux Clang
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
+        # Linux Clang 使用 libstdc++
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libstdc++")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
         message(STATUS "================================")
         message(STATUS "Clang 静态链接配置 (Linux):")
-        message(STATUS "  - 使用 libc++ 标准库")
+        message(STATUS "  - libstdc++ 将被静态链接")
         message(STATUS "  - protobuf 库静态链接 (.a)")
         message(STATUS "================================")
     endif()
@@ -230,18 +223,18 @@ target_compile_options(${EXECUTABLE_NAME} PRIVATE
 # 链接 protobuf 和其他库（使用 CMake targets）
 # protobuf::libprotobuf target 自动包含所有依赖（absl、utf8_range、upb 等）
 target_link_libraries(${EXECUTABLE_NAME}
-    PRIVATE
-    protobuf::libprotobuf  # 自动处理所有 protobuf 依赖
-    Threads::Threads
+        PRIVATE
+        protobuf::libprotobuf  # 自动处理所有 protobuf 依赖
+        Threads::Threads
 )
 
 # 在 Linux/Unix 上添加 Abseil 所需的系统库
 # 这些是依赖于 Abseil 的现代 Protobuf (3.21+/4.x) 所需的
 if(UNIX AND NOT APPLE)
     target_link_libraries(${EXECUTABLE_NAME}
-        PRIVATE
-        atomic  # absl::base 原子操作所需
-        rt      # absl::synchronization POSIX 实时所需
+            PRIVATE
+            atomic  # absl::base 原子操作所需
+            rt      # absl::synchronization POSIX 实时所需
     )
     message(STATUS "已添加 Linux 系统库: atomic, rt (Abseil 所需)")
 endif()
@@ -249,7 +242,7 @@ endif()
 # 如果需要，添加 Windows 特定的库
 if(WIN32)
     target_link_libraries(${EXECUTABLE_NAME}
-        PRIVATE
+            PRIVATE
             kernel32     # ConPTY 函数所需 (CreatePseudoConsole 等)
             dbghelp      # 符号化函数所需 (SymInitialize, SymFromAddr)
             psapi        # 进程 API 函数所需
@@ -268,7 +261,7 @@ if(WIN32)
     message(STATUS "Windows LLDB 库: ${LLDB_LIB_PATH}")
 
     target_link_libraries(${EXECUTABLE_NAME}
-        PRIVATE
+            PRIVATE
             ${LLDB_LIB_PATH}
             psapi
             ws2_32
@@ -282,7 +275,7 @@ elseif(APPLE)
     message(STATUS "macOS LLDB 库: ${LLDB_LIB_PATH}")
 
     target_link_libraries(${EXECUTABLE_NAME}
-        PRIVATE
+            PRIVATE
             ${LLDB_LIB_PATH}
     )
 else()
@@ -296,9 +289,9 @@ else()
 
     # 设置 RPATH，以便运行时能找到依赖的共享库
     set_target_properties(${EXECUTABLE_NAME} PROPERTIES
-        BUILD_WITH_INSTALL_RPATH FALSE
-        INSTALL_RPATH "${LLDB_LIB_DIR}:\$ORIGIN/../lib:\$ORIGIN"
-        INSTALL_RPATH_USE_LINK_PATH TRUE
+            BUILD_WITH_INSTALL_RPATH FALSE
+            INSTALL_RPATH "${LLDB_LIB_DIR}:\$ORIGIN/../lib:\$ORIGIN"
+            INSTALL_RPATH_USE_LINK_PATH TRUE
     )
 
     # 设置链接时的库搜索路径
@@ -306,11 +299,11 @@ else()
 
     # 添加链接器选项：允许共享库有未定义的符号（运行时解析）
     target_link_options(${EXECUTABLE_NAME} PRIVATE
-        "-Wl,--allow-shlib-undefined"
+            "-Wl,--allow-shlib-undefined"
     )
 
     target_link_libraries(${EXECUTABLE_NAME}
-        PRIVATE
+            PRIVATE
             ${LLDB_LIB_PATH}
             dl  # 动态链接库加载
     )

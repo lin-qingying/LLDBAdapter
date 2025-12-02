@@ -31,9 +31,9 @@ function(build_protobuf)
             if(GIT_EXECUTABLE)
                 message(STATUS "初始化 Protobuf 子模块...")
                 execute_process(
-                    COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
-                    WORKING_DIRECTORY ${PROTOBUF_SOURCE_DIR}
-                    OUTPUT_QUIET ERROR_QUIET
+                        COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
+                        WORKING_DIRECTORY ${PROTOBUF_SOURCE_DIR}
+                        OUTPUT_QUIET ERROR_QUIET
                 )
             endif()
         endif()
@@ -44,32 +44,11 @@ function(build_protobuf)
         # 配置 protobuf 构建
         message(STATUS "配置 Protobuf 构建...")
         message(STATUS "  这可能需要一些时间，请耐心等待...")
-
-        # 为 Windows 设置额外的编译标志以确保兼容性
-        set(EXTRA_CMAKE_FLAGS "")
-        if(WIN32)
-            list(APPEND EXTRA_CMAKE_FLAGS
-                "-DCMAKE_C_FLAGS=-D_WIN32_WINNT=0x0601"
-                "-DCMAKE_CXX_FLAGS=-D_WIN32_WINNT=0x0601"
-            )
-            message(STATUS "  添加 Windows 兼容性标志: _WIN32_WINNT=0x0601 (Windows 7+)")
-
-            # 如果使用 Clang，确保 protobuf 也使用 libc++
-            if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-                list(APPEND EXTRA_CMAKE_FLAGS
-                    "-DCMAKE_CXX_FLAGS=-D_WIN32_WINNT=0x0601 -stdlib=libc++"
-                )
-                message(STATUS "  使用 libc++ 标准库以匹配主程序")
-            endif()
-        endif()
-
         execute_process(
-            COMMAND ${CMAKE_COMMAND} -G ${CMAKE_GENERATOR}
+                COMMAND ${CMAKE_COMMAND} -G ${CMAKE_GENERATOR}
                 -DCMAKE_INSTALL_PREFIX=${PROTOBUF_INSTALL_DIR}
                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                 -DCMAKE_CXX_STANDARD=17
-                -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                 -Dprotobuf_BUILD_TESTS=OFF
                 -Dprotobuf_BUILD_EXAMPLES=OFF
                 -Dprotobuf_BUILD_PROTOC_BINARIES=ON
@@ -77,11 +56,10 @@ function(build_protobuf)
                 -Dprotobuf_WITH_ZLIB=OFF
                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                 -Dprotobuf_INSTALL=ON
-                ${EXTRA_CMAKE_FLAGS}
                 ${PROTOBUF_SOURCE_DIR}
-            WORKING_DIRECTORY ${PROTOBUF_BUILD_DIR}
-            RESULT_VARIABLE PROTOBUF_CONFIGURE_RESULT
-            # 移除 OUTPUT_VARIABLE 和 ERROR_VARIABLE 以显示实时输出
+                WORKING_DIRECTORY ${PROTOBUF_BUILD_DIR}
+                RESULT_VARIABLE PROTOBUF_CONFIGURE_RESULT
+                # 移除 OUTPUT_VARIABLE 和 ERROR_VARIABLE 以显示实时输出
         )
 
         if(NOT PROTOBUF_CONFIGURE_RESULT EQUAL 0)
@@ -102,10 +80,10 @@ function(build_protobuf)
         endif()
 
         execute_process(
-            COMMAND ${CMAKE_COMMAND} --build . --config ${CMAKE_BUILD_TYPE} --target install --parallel ${PARALLEL_JOBS}
-            WORKING_DIRECTORY ${PROTOBUF_BUILD_DIR}
-            RESULT_VARIABLE PROTOBUF_BUILD_RESULT
-            # 移除 OUTPUT_VARIABLE 和 ERROR_VARIABLE 以显示实时输出
+                COMMAND ${CMAKE_COMMAND} --build . --config ${CMAKE_BUILD_TYPE} --target install --parallel ${PARALLEL_JOBS}
+                WORKING_DIRECTORY ${PROTOBUF_BUILD_DIR}
+                RESULT_VARIABLE PROTOBUF_BUILD_RESULT
+                # 移除 OUTPUT_VARIABLE 和 ERROR_VARIABLE 以显示实时输出
         )
 
         if(NOT PROTOBUF_BUILD_RESULT EQUAL 0)
@@ -147,10 +125,10 @@ function(build_protobuf)
 
     # Proto 文件列表（相对于 schema 目录的文件名）
     set(PROTO_FILE_NAMES
-        event.proto
-        model.proto
-        request.proto
-        response.proto
+            event.proto
+            model.proto
+            request.proto
+            response.proto
     )
 
     # 完整的 Proto 文件路径（用于依赖检查）
@@ -209,14 +187,14 @@ function(build_protobuf)
 
         # 立即执行 protoc 生成文件
         execute_process(
-            COMMAND ${PROTOC_EXECUTABLE}
+                COMMAND ${PROTOC_EXECUTABLE}
                 --cpp_out=${GENERATED_PROTO_DIR}
                 --proto_path=${CMAKE_SOURCE_DIR}/schema
                 ${PROTO_FILE_NAMES}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/schema
-            RESULT_VARIABLE PROTOC_RESULT
-            OUTPUT_VARIABLE PROTOC_OUTPUT
-            ERROR_VARIABLE PROTOC_ERROR
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/schema
+                RESULT_VARIABLE PROTOC_RESULT
+                OUTPUT_VARIABLE PROTOC_OUTPUT
+                ERROR_VARIABLE PROTOC_ERROR
         )
 
         if(NOT PROTOC_RESULT EQUAL 0)
@@ -230,22 +208,22 @@ function(build_protobuf)
 
     # 添加手动重新生成目标（用于强制重新生成）
     add_custom_target(regenerate_protos
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${GENERATED_PROTO_DIR}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PROTO_DIR}
-        COMMAND ${CMAKE_COMMAND} -E echo "重新配置以生成 proto 文件..."
-        COMMAND ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "删除生成的 protobuf 文件并重新配置"
-        VERBATIM
+            COMMAND ${CMAKE_COMMAND} -E remove_directory ${GENERATED_PROTO_DIR}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PROTO_DIR}
+            COMMAND ${CMAKE_COMMAND} -E echo "重新配置以生成 proto 文件..."
+            COMMAND ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "删除生成的 protobuf 文件并重新配置"
+            VERBATIM
     )
 
     # 添加从源代码重新构建 protobuf 的自定义目标
     add_custom_target(rebuild_protobuf
-        COMMAND ${CMAKE_COMMAND} -E echo "从源代码重新构建 protobuf..."
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/third_party/protobuf-build
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/third_party/protobuf-install
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${GENERATED_PROTO_DIR}
-        COMMENT "从源代码重新构建 protobuf（将触发 CMake 重新配置）"
+            COMMAND ${CMAKE_COMMAND} -E echo "从源代码重新构建 protobuf..."
+            COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/third_party/protobuf-build
+            COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/third_party/protobuf-install
+            COMMAND ${CMAKE_COMMAND} -E remove_directory ${GENERATED_PROTO_DIR}
+            COMMENT "从源代码重新构建 protobuf（将触发 CMake 重新配置）"
     )
 
     # 将生成目录添加到包含路径
