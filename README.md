@@ -38,9 +38,56 @@ cmake --build .
 make
 ```
 
+### Cross-Compilation for ARM
+
+The project provides toolchain files for cross-compiling from Linux AMD64 to ARM architectures:
+
+#### ARM64 (aarch64)
+```bash
+# Install cross-compilation toolchain (Ubuntu/Debian)
+sudo apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+# Configure and build
+mkdir build-arm64 && cd build-arm64
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm64.cmake ..
+cmake --build .
+```
+
+#### ARM32 (armhf)
+```bash
+# Install cross-compilation toolchain (Ubuntu/Debian)
+sudo apt-get install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+
+# Configure and build
+mkdir build-arm32 && cd build-arm32
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm32.cmake ..
+cmake --build .
+```
+
+#### Custom Toolchain Paths
+If your toolchain is installed in a non-standard location:
+```bash
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm64.cmake \
+      -DCMAKE_C_COMPILER=/path/to/aarch64-linux-gnu-gcc \
+      -DCMAKE_CXX_COMPILER=/path/to/aarch64-linux-gnu-g++ \
+      ..
+```
+
+#### Using Sysroot
+For cross-compilation with specific ARM libraries:
+```bash
+# Edit the toolchain file and uncomment the CMAKE_SYSROOT lines
+# Or pass it via command line:
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm64.cmake \
+      -DCMAKE_SYSROOT=/path/to/arm64/sysroot \
+      ..
+```
+
 The main executable will be available at:
-- **Windows**: `output/CangJieLLDBFrontend.exe`
-- **Linux/macOS**: `output/CangJieLLDBFrontend`
+- **Windows**: `output/CangJieLLDBAdapter.exe`
+- **Linux/macOS**: `output/CangJieLLDBAdapter`
+- **ARM64**: `output/CangJieLLDBAdapter` (cross-compiled)
+- **ARM32**: `output/CangJieLLDBAdapter` (cross-compiled)
 
 ### Running the Debugger
 
@@ -48,8 +95,8 @@ The debugger requires a port number for TCP communication:
 
 ```bash
 # Start debugger frontend listening on port 8080
-output/CangJieLLDBFrontend.exe 8080  # Windows
-./output/CangJieLLDBFrontend 8080     # Linux/macOS
+output/CangJieLLDBAdapter.exe 8080  # Windows
+./output/CangJieLLDBAdapter 8080     # Linux/macOS
 ```
 
 ## 📁 Project Structure
@@ -120,7 +167,7 @@ The debugger uses a layered architecture:
 ```
 Debug Frontend (IDE/Editor)
     ↓ (TCP + Protocol Buffers)
-CangJieLLDBFrontend (Main Executable)
+CangJieLLDBAdapter (Main Executable)
     ↓ (Dynamic Library Loading)
 liblldb.dll / liblldb.so / liblldb.dylib
     ↓
@@ -168,7 +215,7 @@ Target Cangjie Program Process
 
 ```bash
 # Build main executable only
-cmake --build . --target CangJieLLDBFrontend
+cmake --build . --target CangJieLLDBAdapter
 
 # Regenerate protobuf files manually
 cmake --build . --target regenerate_protoids

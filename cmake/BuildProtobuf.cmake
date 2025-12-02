@@ -78,7 +78,43 @@ function(build_protobuf)
             endif()
         endif()
 
-        # 设置protobuf变量 - 包含protobuf、absl和utf8_range库
+        # Find all utf8-related libraries (utf8_range, utf8_validity, etc.)
+        # Note: libutf8_range and libutf8_validity may have duplicate symbols, prefer utf8_validity
+        file(GLOB ALL_UTF8_LIBRARIES
+                LIST_DIRECTORIES false
+                "${PROTOBUF_INSTALL_DIR}/lib/libutf8_validity.a"
+                "${PROTOBUF_INSTALL_DIR}/lib/utf8_validity.lib"
+        )
+
+        if(ALL_UTF8_LIBRARIES)
+            list(LENGTH ALL_UTF8_LIBRARIES UTF8_COUNT)
+            message(STATUS "Found ${UTF8_COUNT} utf8 libraries: ${ALL_UTF8_LIBRARIES}")
+        else()
+            # Fallback to utf8_range if validity not found
+            file(GLOB ALL_UTF8_LIBRARIES
+                    LIST_DIRECTORIES false
+                    "${PROTOBUF_INSTALL_DIR}/lib/libutf8_range.a"
+                    "${PROTOBUF_INSTALL_DIR}/lib/utf8_range.lib"
+            )
+            if(ALL_UTF8_LIBRARIES)
+                list(LENGTH ALL_UTF8_LIBRARIES UTF8_COUNT)
+                message(STATUS "Found ${UTF8_COUNT} utf8 libraries (fallback): ${ALL_UTF8_LIBRARIES}")
+            endif()
+        endif()
+
+        # Find all upb-related libraries
+        file(GLOB UPB_LIBRARIES
+                LIST_DIRECTORIES false
+                "${PROTOBUF_INSTALL_DIR}/lib/libupb*.a"
+                "${PROTOBUF_INSTALL_DIR}/lib/upb*.lib"
+        )
+
+        if(UPB_LIBRARIES)
+            list(LENGTH UPB_LIBRARIES UPB_COUNT)
+            message(STATUS "Found ${UPB_COUNT} upb libraries: ${UPB_LIBRARIES}")
+        endif()
+
+        # 设置protobuf变量 - 包含protobuf、absl、utf8和upb库
         # 包含构建后的头文件和源码目录中的头文件
         set(PROTOBUF_INCLUDE_DIRS
             ${PROTOBUF_INSTALL_DIR}/include
@@ -89,7 +125,8 @@ function(build_protobuf)
             ${PROTOBUF_LIB_PATH}
             ${PROTOC_LIB_PATH}
             ${ABSL_LIBRARIES}
-            ${UTF8_RANGE_LIBRARY}
+            ${ALL_UTF8_LIBRARIES}
+            ${UPB_LIBRARIES}
             PARENT_SCOPE
         )
         set(PROTOBUF_PROTOC_EXECUTABLE ${PROTOBUF_INSTALL_DIR}/bin/protoc${CMAKE_EXECUTABLE_SUFFIX} PARENT_SCOPE)
@@ -254,12 +291,49 @@ function(build_protobuf)
         endif()
     endif()
 
-    # 设置库文件变量 - 包含protobuf、absl和utf8_range库
+    # Find all utf8-related libraries (utf8_range, utf8_validity, etc.)
+    # Note: libutf8_range and libutf8_validity may have duplicate symbols, prefer utf8_validity
+    file(GLOB ALL_UTF8_LIBRARIES
+            LIST_DIRECTORIES false
+            "${PROTOBUF_INSTALL_DIR}/lib/libutf8_validity.a"
+            "${PROTOBUF_INSTALL_DIR}/lib/utf8_validity.lib"
+    )
+
+    if(ALL_UTF8_LIBRARIES)
+        list(LENGTH ALL_UTF8_LIBRARIES UTF8_COUNT)
+        message(STATUS "Found ${UTF8_COUNT} utf8 libraries: ${ALL_UTF8_LIBRARIES}")
+    else()
+        # Fallback to utf8_range if validity not found
+        file(GLOB ALL_UTF8_LIBRARIES
+                LIST_DIRECTORIES false
+                "${PROTOBUF_INSTALL_DIR}/lib/libutf8_range.a"
+                "${PROTOBUF_INSTALL_DIR}/lib/utf8_range.lib"
+        )
+        if(ALL_UTF8_LIBRARIES)
+            list(LENGTH ALL_UTF8_LIBRARIES UTF8_COUNT)
+            message(STATUS "Found ${UTF8_COUNT} utf8 libraries (fallback): ${ALL_UTF8_LIBRARIES}")
+        endif()
+    endif()
+
+    # Find all upb-related libraries
+    file(GLOB UPB_LIBRARIES
+            LIST_DIRECTORIES false
+            "${PROTOBUF_INSTALL_DIR}/lib/libupb*.a"
+            "${PROTOBUF_INSTALL_DIR}/lib/upb*.lib"
+    )
+
+    if(UPB_LIBRARIES)
+        list(LENGTH UPB_LIBRARIES UPB_COUNT)
+        message(STATUS "Found ${UPB_COUNT} upb libraries: ${UPB_LIBRARIES}")
+    endif()
+
+    # 设置库文件变量 - 包含protobuf、absl、utf8和upb库
     set(PROTOBUF_LIBRARIES
         ${PROTOBUF_LIB_PATH}
         ${PROTOC_LIB_PATH}
         ${ABSL_LIBRARIES}
-        ${UTF8_RANGE_LIBRARY}
+        ${ALL_UTF8_LIBRARIES}
+        ${UPB_LIBRARIES}
         PARENT_SCOPE
     )
 

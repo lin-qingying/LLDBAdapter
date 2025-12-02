@@ -4,7 +4,7 @@
 #
 # See https://cangjie-lang.cn/pages/LICENSE for license information.
 
-cmake_minimum_required(VERSION 3.16.5)
+cmake_minimum_required(VERSION 3.16.3)
 
 project(CangjieDebugger VERSION 1.0.0 LANGUAGES CXX)
 
@@ -191,26 +191,32 @@ if(PROTOBUF_AUTO_BUILD_ENABLED)
             message(STATUS "No absl libraries found in ${PROTOBUF_INSTALL_DIR}/lib")
         endif()
 
-        # Find utf8_range and other third-party libraries
-        find_library(UTF8_RANGE_LIBRARY
-                NAMES utf8_range libutf8_range utf8_ranged libutf8_ranged
-                PATHS ${PROTOBUF_INSTALL_DIR}/lib
-                NO_DEFAULT_PATH
+        # Find all utf8-related libraries (utf8_range, utf8_validity, etc.)
+        file(GLOB UTF8_LIBRARIES
+                LIST_DIRECTORIES false
+                "${PROTOBUF_INSTALL_DIR}/lib/libutf8*.a"
+                "${PROTOBUF_INSTALL_DIR}/lib/utf8*.lib"
         )
 
-        if(UTF8_RANGE_LIBRARY)
-            message(STATUS "Found utf8_range library: ${UTF8_RANGE_LIBRARY}")
+        if(UTF8_LIBRARIES)
+            list(LENGTH UTF8_LIBRARIES UTF8_COUNT)
+            message(STATUS "Found ${UTF8_COUNT} utf8 libraries: ${UTF8_LIBRARIES}")
         else()
-            message(STATUS "utf8_range library not found, searching for alternatives...")
-            file(GLOB UTF8_LIBRARIES
-                    LIST_DIRECTORIES false
-                    "${PROTOBUF_INSTALL_DIR}/lib/*utf8*.a"
-                    "${PROTOBUF_INSTALL_DIR}/lib/*utf8*.lib"
-            )
-            if(UTF8_LIBRARIES)
-                message(STATUS "Found utf8 libraries: ${UTF8_LIBRARIES}")
-                set(UTF8_RANGE_LIBRARY ${UTF8_LIBRARIES})
-            endif()
+            message(STATUS "No utf8 libraries found in ${PROTOBUF_INSTALL_DIR}/lib")
+        endif()
+
+        # Find all upb-related libraries
+        file(GLOB UPB_LIBRARIES
+                LIST_DIRECTORIES false
+                "${PROTOBUF_INSTALL_DIR}/lib/libupb*.a"
+                "${PROTOBUF_INSTALL_DIR}/lib/upb*.lib"
+        )
+
+        if(UPB_LIBRARIES)
+            list(LENGTH UPB_LIBRARIES UPB_COUNT)
+            message(STATUS "Found ${UPB_COUNT} upb libraries: ${UPB_LIBRARIES}")
+        else()
+            message(STATUS "No upb libraries found in ${PROTOBUF_INSTALL_DIR}/lib")
         endif()
 
         # Create a comprehensive list of all libraries
@@ -218,12 +224,9 @@ if(PROTOBUF_AUTO_BUILD_ENABLED)
                 ${PROTOBUF_LIBRARY}
                 ${PROTOC_LIBRARY}
                 ${ALL_ABSL_LIBRARIES}
+                ${UTF8_LIBRARIES}
+                ${UPB_LIBRARIES}
         )
-
-        # Add utf8_range library if found
-        if(UTF8_RANGE_LIBRARY)
-            list(APPEND ALL_LIBRARIES ${UTF8_RANGE_LIBRARY})
-        endif()
 
         # Set final protobuf libraries with ALL libraries found
         set(PROTOBUF_LIBRARIES ${ALL_LIBRARIES})
@@ -470,18 +473,56 @@ set(ALL_SOURCES
 
 )
 
-# Create single executable: CangJieLLDBFrontend
-add_executable(CangJieLLDBFrontend
+# ============================================
+# Determine output suffix based on platform
+# ============================================
+# Check if toolchain file set these variables
+if(NOT DEFINED CANGJIE_OUTPUT_SUFFIX)
+    # Auto-detect platform if not set by toolchain file
+    if(WIN32)
+        set(CANGJIE_TARGET_OS "windows")
+    elseif(APPLE)
+        set(CANGJIE_TARGET_OS "macos")
+    else()
+        set(CANGJIE_TARGET_OS "linux")
+    endif()
+
+    # Detect architecture
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+        set(CANGJIE_TARGET_ARCH "arm64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "armv7|arm")
+        set(CANGJIE_TARGET_ARCH "arm32")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+        set(CANGJIE_TARGET_ARCH "amd64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "i686|i386|x86")
+        set(CANGJIE_TARGET_ARCH "x86")
+    else()
+        set(CANGJIE_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+
+    set(CANGJIE_OUTPUT_SUFFIX "${CANGJIE_TARGET_OS}_${CANGJIE_TARGET_ARCH}")
+endif()
+
+message(STATUS "====================================")
+message(STATUS "Target Platform Configuration:")
+message(STATUS "  OS: ${CANGJIE_TARGET_OS}")
+message(STATUS "  Architecture: ${CANGJIE_TARGET_ARCH}")
+message(STATUS "  Output suffix: ${CANGJIE_OUTPUT_SUFFIX}")
+message(STATUS "====================================")
+
+# Create single executable: CangJieLLDBAdapter_<os>_<arch>
+set(EXECUTABLE_NAME "CangJieLLDBAdapter_${CANGJIE_OUTPUT_SUFFIX}")
+add_executable(${EXECUTABLE_NAME}
         src/main.cpp
         ${ALL_SOURCES}
 )
 
 # Set C++17 standard
-set_property(TARGET CangJieLLDBFrontend PROPERTY CXX_STANDARD 17)
-set_property(TARGET CangJieLLDBFrontend PROPERTY CXX_STANDARD_REQUIRED ON)
+set_property(TARGET ${EXECUTABLE_NAME} PROPERTY CXX_STANDARD 17)
+set_property(TARGET ${EXECUTABLE_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
 
-# Ensure protobuf static linking
-target_compile_definitions(CangJieLLDBFrontend PRIVATE PROTOBUF_USE_DLLS=0)
+# Note: Do NOT define PROTOBUF_USE_DLLS - let protobuf use its default settings
+# The generated code must match the library's compilation settings
 
 # Suppress warnings in protobuf generated files and includes
 foreach(PROTO_SRC ${ALL_PROTO_SRCS})
@@ -492,20 +533,22 @@ foreach(PROTO_SRC ${ALL_PROTO_SRCS})
 endforeach()
 
 # Also suppress warnings for protobuf headers when compiling other files
-target_compile_options(CangJieLLDBFrontend PRIVATE
+target_compile_options(${EXECUTABLE_NAME} PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-Wno-sign-compare>
 )
 
 # Link libraries with proper grouping for static libraries
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_link_libraries(CangJieLLDBFrontend
-            -Wl,--start-group
+    # Use --whole-archive to force linking all symbols from static libraries
+    # This prevents Release mode optimization from removing symbols like ThreadSafeArena::thread_cache()
+    target_link_libraries(${EXECUTABLE_NAME}
+            -Wl,--whole-archive
             ${PROTOBUF_LIBRARIES}
-            -Wl,--end-group
+            -Wl,--no-whole-archive
             Threads::Threads
     )
 else()
-    target_link_libraries(CangJieLLDBFrontend
+    target_link_libraries(${EXECUTABLE_NAME}
             ${PROTOBUF_LIBRARIES}
             Threads::Threads
     )
@@ -513,18 +556,19 @@ endif()
 
 # Add Windows-specific libraries if needed
 if(WIN32)
-    target_link_libraries(CangJieLLDBFrontend
+    target_link_libraries(${EXECUTABLE_NAME}
             kernel32     # For ConPTY functions (CreatePseudoConsole, etc.)
             dbghelp      # For symbolization functions like SymInitialize, SymFromAddr
             psapi        # For process API functions
             wsock32      # For socket functions
             ws2_32       # For Windows Sockets 2
+            bcrypt       # For BCrypt cryptographic functions (used by absl random)
     )
 endif()
 
 # LLDB dynamic linking configuration
 if(WIN32)
-    target_link_libraries(CangJieLLDBFrontend
+    target_link_libraries(${EXECUTABLE_NAME}
             ${CMAKE_CURRENT_SOURCE_DIR}/third_party/liblldb.dll
             ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libclang.dll
             psapi
@@ -534,12 +578,12 @@ if(WIN32)
 else()
     find_library(LLDB_LIB lldb)
     if(LLDB_LIB)
-        target_link_libraries(CangJieLLDBFrontend ${LLDB_LIB})
+        target_link_libraries(${EXECUTABLE_NAME} ${LLDB_LIB})
     endif()
 endif()
 
 # Installation
-install(TARGETS CangJieLLDBFrontend
+install(TARGETS ${EXECUTABLE_NAME}
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib
@@ -585,12 +629,12 @@ install(FILES
 )
 
 # ============================================
-# 复制所需的 DLL 到输出目录
+# 复制所需的 DLL 到输出目录（仅 Debug 模式）
 # ============================================
-if(WIN32)
+if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     # 分类说明DLL的用途
     message(STATUS "================================")
-    message(STATUS "DLL Dependency Configuration:")
+    message(STATUS "DLL Dependency Configuration (Debug Mode Only):")
     message(STATUS "  Main executable: Statically links libstdc++ and libgcc")
     message(STATUS "  Third-party DLLs: Keep their own dynamic dependencies")
     message(STATUS "================================")
@@ -632,15 +676,15 @@ if(WIN32)
             ${RUNTIME_DLLS}
     )
 
-    # 复制每个DLL到输出目录
+    # 复制每个DLL到输出目录（仅在 Debug 模式）
     foreach(DLL_FILE ${REQUIRED_DLLS})
         set(DLL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/${DLL_FILE}")
         if(EXISTS ${DLL_SOURCE})
-            add_custom_command(TARGET CangJieLLDBFrontend POST_BUILD
+            add_custom_command(TARGET ${EXECUTABLE_NAME} POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     ${DLL_SOURCE}
                     ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${DLL_FILE}
-                    COMMENT "Copying ${DLL_FILE} to output directory"
+                    COMMENT "Copying ${DLL_FILE} to output directory (Debug mode)"
             )
         else()
             message(WARNING "DLL not found: ${DLL_SOURCE}")
@@ -649,7 +693,14 @@ if(WIN32)
 
     message(STATUS "================================")
     message(STATUS "DLL Copy Configuration:")
+    message(STATUS "  Build Type: Debug (DLLs will be copied)")
     message(STATUS "  Total DLLs to copy: ${REQUIRED_DLLS}")
     message(STATUS "  Output directory: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    message(STATUS "================================")
+elseif(WIN32)
+    message(STATUS "================================")
+    message(STATUS "DLL Copy Configuration:")
+    message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE} (DLLs will NOT be copied)")
+    message(STATUS "  Note: DLLs are only copied in Debug mode")
     message(STATUS "================================")
 endif()

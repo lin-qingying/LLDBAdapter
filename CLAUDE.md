@@ -42,7 +42,7 @@ cmake --build .
 ### Build Specific Components
 ```bash
 # Build main executable only
-cmake --build . --target CangJieLLDBFrontend
+cmake --build . --target CangJieLLDBAdapter
 
 # Regenerate protobuf files manually
 cmake --build . --target regenerate_protoids
@@ -54,11 +54,11 @@ cmake --build . --target rebuild_protobuf
 ### Running the Debugger
 ```bash
 # The main executable requires a port number for TCP communication
-./output/CangJieLLDBFrontend 8080
+./output/CangJieLLDBAdapter 8080
 
 # Example: Start debugger frontend listening on port 8080
-output/CangJieLLDBFrontend.exe 8080  # Windows
-./output/CangJieLLDBFrontend 8080     # Linux/macOS
+output/CangJieLLDBAdapter.exe 8080  # Windows
+./output/CangJieLLDBAdapter 8080     # Linux/macOS
 ```
 
 ### Testing (Planned)
@@ -83,6 +83,52 @@ cmake ..
 make
 ```
 
+### Cross-Compilation for ARM Architectures
+
+The project provides toolchain files for cross-compiling from Linux AMD64 to ARM:
+
+#### ARM64 (aarch64) Cross-Compilation
+```bash
+# Install toolchain (Ubuntu/Debian)
+sudo apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+# Configure and build
+mkdir build-arm64 && cd build-arm64
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm64.cmake ..
+cmake --build .
+```
+
+#### ARM32 (armhf) Cross-Compilation
+```bash
+# Install toolchain (Ubuntu/Debian)
+sudo apt-get install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+
+# Configure and build
+mkdir build-arm32 && cd build-arm32
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm32.cmake ..
+cmake --build .
+```
+
+#### Custom Cross-Compilation Settings
+```bash
+# Custom compiler paths
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm64.cmake \
+      -DCMAKE_C_COMPILER=/custom/path/aarch64-linux-gnu-gcc \
+      -DCMAKE_CXX_COMPILER=/custom/path/aarch64-linux-gnu-g++ \
+      ..
+
+# Using sysroot for ARM libraries
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm64.cmake \
+      -DCMAKE_SYSROOT=/path/to/arm64/sysroot \
+      ..
+```
+
+**Toolchain Files**:
+- `cmake/toolchain-linux-arm64.cmake`: Linux AMD64 → ARM64 (aarch64)
+- `cmake/toolchain-linux-arm32.cmake`: Linux AMD64 → ARM32 (armhf)
+
+**Note**: When cross-compiling, ensure all dependencies (protobuf, LLDB) are available for the target architecture.
+
 ## Project Architecture
 
 This is a **Cangjie language debugger** built using a layered architecture with LLDB as the debugging backend and Protocol Buffers for communication. The project uses a custom protobuf-based protocol designed specifically for LLDB integration.
@@ -93,7 +139,7 @@ This is a **Cangjie language debugger** built using a layered architecture with 
    - Dynamically links with LLDB libraries at runtime
    - Provides C++ wrappers around LLDB C++ API
    - Handles platform-specific LLDB integration (Windows/Linux/macOS)
-   - Main executable: `CangJieLLDBFrontend`
+   - Main executable: `CangJieLLDBAdapter`
 
 2. **Protocol Communication Layer** (`src/protocol/ProtoConverter.cpp`, `schema/`)
    - Uses custom Protocol Buffers v3 schema optimized for LLDB
@@ -216,7 +262,7 @@ The debugger uses LLDB's C++ API with dynamic loading patterns:
 - Export of compile commands for IDE integration
 
 **Output Structure**:
-- **Main executable**: `output/CangJieLLDBFrontend.exe` (Windows) or `output/CangJieLLDBFrontend` (Unix)
+- **Main executable**: `output/CangJieLLDBAdapter.exe` (Windows) or `output/CangJieLLDBAdapter` (Unix)
 - **Generated protobuf files**: `build/generated/proto/`
 - **Third-party libraries**: `third_party/` contains LLDB and protobuf dependencies
 - **Required DLLs**: Automatically copied to `output/` on Windows

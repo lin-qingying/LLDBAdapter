@@ -38,9 +38,56 @@ cmake --build .
 make
 ```
 
+### ARM 交叉编译
+
+本项目提供了从 Linux AMD64 交叉编译到 ARM 架构的工具链配置文件：
+
+#### ARM64 (aarch64)
+```bash
+# 安装交叉编译工具链 (Ubuntu/Debian)
+sudo apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+# 配置和构建
+mkdir build-arm64 && cd build-arm64
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm64.cmake ..
+cmake --build .
+```
+
+#### ARM32 (armhf)
+```bash
+# 安装交叉编译工具链 (Ubuntu/Debian)
+sudo apt-get install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+
+# 配置和构建
+mkdir build-arm32 && cd build-arm32
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm32.cmake ..
+cmake --build .
+```
+
+#### 自定义工具链路径
+如果您的工具链安装在非标准位置：
+```bash
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm64.cmake \
+      -DCMAKE_C_COMPILER=/path/to/aarch64-linux-gnu-gcc \
+      -DCMAKE_CXX_COMPILER=/path/to/aarch64-linux-gnu-g++ \
+      ..
+```
+
+#### 使用 Sysroot
+针对包含特定 ARM 库的交叉编译：
+```bash
+# 编辑工具链文件并取消注释 CMAKE_SYSROOT 行
+# 或通过命令行传递：
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain-linux-arm64.cmake \
+      -DCMAKE_SYSROOT=/path/to/arm64/sysroot \
+      ..
+```
+
 主可执行文件将位于：
-- **Windows**: `output/CangJieLLDBFrontend.exe`
-- **Linux/macOS**: `output/CangJieLLDBFrontend`
+- **Windows**: `output/CangJieLLDBAdapter.exe`
+- **Linux/macOS**: `output/CangJieLLDBAdapter`
+- **ARM64**: `output/CangJieLLDBAdapter` (交叉编译)
+- **ARM32**: `output/CangJieLLDBAdapter` (交叉编译)
 
 ### 运行调试器
 
@@ -48,8 +95,8 @@ make
 
 ```bash
 # 在端口 8080 启动调试器前端
-output/CangJieLLDBFrontend.exe 8080  # Windows
-./output/CangJieLLDBFrontend 8080     # Linux/macOS
+output/CangJieLLDBAdapter.exe 8080  # Windows
+./output/CangJieLLDBAdapter 8080     # Linux/macOS
 ```
 
 ## 📁 项目结构
@@ -120,7 +167,7 @@ build/generated/proto/
 ```
 调试前端（IDE/编辑器）
     ↓ (TCP + Protocol Buffers)
-CangJieLLDBFrontend（主可执行文件）
+CangJieLLDBAdapter（主可执行文件）
     ↓ (动态库加载)
 liblldb.dll / liblldb.so / liblldb.dylib
     ↓
@@ -168,7 +215,7 @@ liblldb.dll / liblldb.so / liblldb.dylib
 
 ```bash
 # 仅构建主可执行文件
-cmake --build . --target CangJieLLDBFrontend
+cmake --build . --target CangJieLLDBAdapter
 
 # 手动重新生成 protobuf 文件
 cmake --build . --target regenerate_protoids

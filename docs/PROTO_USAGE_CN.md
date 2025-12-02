@@ -319,7 +319,7 @@ cmake --build . --target regenerate_protos
 cmake --build .
 
 # 运行示例
-./output/CangJieLLDBFrontend 8080
+./output/CangJieLLDBAdapter 8080
 ```
 
 ## 迁移指南

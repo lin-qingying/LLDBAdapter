@@ -140,7 +140,7 @@ namespace Cangjie::Debugger {
         // ============================================
         // 4. 配置启动标志
         // ============================================
-        uint32_t launch_flags = 0 /*| lldb::eLaunchFlagDisableSTDIO*/;
+        uint32_t launch_flags = 0 | lldb::eLaunchFlagDisableSTDIO;
 
         LOG_INFO("  Stop at entry: NO (no breakpoints, process will run freely)");
 
