@@ -208,8 +208,14 @@ jobs:
           ninja --version
 
       - name: Configure CMake
-        shell: pwsh
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd64.cmake
+        run: |
+          export PATH="$(brew --prefix)/opt/ccache/libexec:$PATH"
+          cmake -B build \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd.cmake \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
       - name: Build
         shell: pwsh
         run: cmake --build build --config ${{ env.BUILD_TYPE }}
@@ -356,6 +362,7 @@ jobs:
           key: ${{ runner.os }}-arm64-ccache-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-arm64-ccache-
+
 
       - name: Configure CMake
         run: |
