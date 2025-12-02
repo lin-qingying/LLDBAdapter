@@ -2,6 +2,38 @@
 cmake_minimum_required(VERSION 3.16)
 
 function(build_protobuf)
+    # First, try to find system protobuf STATIC libraries only
+    set(Protobuf_USE_STATIC_LIBS ON)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .a)  # Force static library search on Unix
+
+    find_package(Protobuf QUIET)
+
+    if(Protobuf_FOUND)
+        # Verify that we found static libraries
+        set(HAS_STATIC_LIBS TRUE)
+        foreach(lib ${Protobuf_LIBRARIES})
+            if(lib MATCHES "\\.so$" OR lib MATCHES "\\.dylib$" OR lib MATCHES "\\.dll$")
+                set(HAS_STATIC_LIBS FALSE)
+                message(STATUS "Found dynamic protobuf library: ${lib}, will build from source for static linking")
+                break()
+            endif()
+        endforeach()
+
+        if(HAS_STATIC_LIBS)
+            message(STATUS "Using system static protobuf: ${Protobuf_VERSION}")
+            message(STATUS "  Protoc: ${Protobuf_PROTOC_EXECUTABLE}")
+            message(STATUS "  Include dirs: ${Protobuf_INCLUDE_DIRS}")
+            message(STATUS "  Libraries: ${Protobuf_LIBRARIES}")
+
+            set(PROTOBUF_INCLUDE_DIRS ${Protobuf_INCLUDE_DIRS} PARENT_SCOPE)
+            set(PROTOBUF_LIBRARIES ${Protobuf_LIBRARIES} PARENT_SCOPE)
+            set(PROTOBUF_PROTOC_EXECUTABLE ${Protobuf_PROTOC_EXECUTABLE} PARENT_SCOPE)
+            return()
+        endif()
+    endif()
+
+    message(STATUS "System static protobuf not found, will build from source...")
+
     set(PROTOBUF_BUILD_DIR ${CMAKE_BINARY_DIR}/third_party/protobuf-build)
     set(PROTOBUF_INSTALL_DIR ${CMAKE_BINARY_DIR}/third_party/protobuf-install)
     set(PROTOBUF_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf)

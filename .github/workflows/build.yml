@@ -32,7 +32,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential ccache
+          sudo apt-get install -y build-essential ccache \
+            protobuf-compiler libprotobuf-dev
 
       - name: Cache protobuf build
         uses: actions/cache@v4
@@ -104,7 +105,9 @@ jobs:
             gcc-aarch64-linux-gnu \
             g++-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
-            ccache
+            ccache \
+            protobuf-compiler \
+            libprotobuf-dev
 
       - name: Cache protobuf build
         uses: actions/cache@v4
