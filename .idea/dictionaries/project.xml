@@ -1,8 +1,12 @@
 <component name="ProjectDictionaryState">
   <dictionary name="project">
     <words>
+      <w>dlclose</w>
       <w>envp</w>
+      <w>fbff</w>
+      <w>libfoo</w>
       <w>lldbprotobuf</w>
+      <w>oneof</w>
       <w>vfork</w>
     </words>
   </dictionary>

@@ -1,34 +1,52 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
-# This source file is part of the Cangjie project, licensed under Apache-2.0
-# with Runtime Library Exception.
-#
-# See https://cangjie-lang.cn/pages/LICENSE for license information.
 
 cmake_minimum_required(VERSION 3.16.3)
 
 project(CangjieDebugger VERSION 1.0.0 LANGUAGES CXX)
 
 # 设置 C++ 标准
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lstdc++")
 
 # ============================================
-# 静态链接 libstdc++ 和 libgcc（仅针对主程序）
+# 静态链接标准库（所有平台）
 # ============================================
-if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # 静态链接标准C++库和GCC运行时库
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # GCC/MinGW: 静态链接标准C++库和GCC运行时库
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libstdc++ -static-libgcc")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++ -static-libgcc")
 
     message(STATUS "================================")
-    message(STATUS "Static linking configuration:")
-    message(STATUS "  - libstdc++ will be statically linked into the executable")
-    message(STATUS "  - libgcc will be statically linked into the executable")
-    message(STATUS "  - Third-party DLLs (like liblldb.dll) will still use their own dynamic dependencies")
+    message(STATUS "GCC 静态链接配置:")
+    message(STATUS "  - libstdc++ 将被静态链接")
+    message(STATUS "  - libgcc 将被静态链接")
+    message(STATUS "  - protobuf 库静态链接 (.a)")
+    if(WIN32)
+        message(STATUS "  - 第三方 DLLs (liblldb.dll) 使用它们自己的依赖")
+    else()
+        message(STATUS "  - 第三方 .so 文件 (liblldb.so) 使用它们自己的依赖")
+    endif()
     message(STATUS "================================")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Clang: 静态链接标准C++库
+    if(APPLE)
+        # macOS 默认使用 libc++
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
+        message(STATUS "================================")
+        message(STATUS "Clang 静态链接配置 (macOS):")
+        message(STATUS "  - libc++ 将被静态链接")
+        message(STATUS "  - protobuf 库静态链接 (.a)")
+        message(STATUS "================================")
+    else()
+        # Linux Clang 使用 libstdc++
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libstdc++")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
+        message(STATUS "================================")
+        message(STATUS "Clang 静态链接配置 (Linux):")
+        message(STATUS "  - libstdc++ 将被静态链接")
+        message(STATUS "  - protobuf 库静态链接 (.a)")
+        message(STATUS "================================")
+    endif()
 endif()
 
 # 构建类型
@@ -49,13 +67,8 @@ foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${CMAKE_SOURCE_DIR}/output)
 endforeach()
 
-# 编译器特定选项
-if(MSVC)
-    add_compile_options(/W4 /WX)
-    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
-else()
-    add_compile_options(-Wall -Wextra -Werror)
-endif()
+# 编译器选项（GCC/Clang）
+add_compile_options(-Wall -Wextra -Werror)
 
 # 导出编译命令
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -65,381 +78,39 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf/src/google)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
-# 查找所需的包
-find_package(PkgConfig)
-if(NOT PkgConfig_FOUND)
-    message(STATUS "未找到 pkg-config，继续执行但不使用它")
-    set(PKG_CONFIG_EXECUTABLE "")
-endif()
+
 
 # 包含 cmake 模块
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# 从本地 third_party 源自动构建 protobuf（带回退机制）
-message(STATUS "设置自动 protobuf 构建...")
-set(PROTOBUF_AUTO_BUILD_ENABLED ON CACHE BOOL "启用自动 protobuf 构建")
+# ============================================
+# Protobuf 配置（使用 BuildProtobuf 模块）
+# ============================================
+# 包含 Protobuf 构建模块
+include(BuildProtobuf)
 
-if(PROTOBUF_AUTO_BUILD_ENABLED)
-    # Try to use existing BuildProtobuf.cmake first
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildProtobuf.cmake)
-        message(STATUS "Found BuildProtobuf.cmake, using it to build protobuf...")
-        include(BuildProtobuf)
-        build_protobuf()
+# 构建并配置 Protobuf（内部使用 find_package 提供 CMake targets 并在配置时生成 proto 文件）
+# 此函数会自动：
+#   1. 构建 protobuf（如果需要）
+#   2. 使用 find_package 找到 protobuf
+#   3. 在配置时立即生成 .proto 文件（使用 execute_process + protoc）
+#   4. 设置 ALL_PROTO_SRCS、ALL_PROTO_HDRS 和 GENERATED_PROTO_DIR 变量
+build_protobuf()
 
-        # Verify protobuf was built successfully
-        if(NOT PROTOBUF_LIBRARIES OR NOT PROTOBUF_INCLUDE_DIRS OR NOT PROTOBUF_PROTOC_EXECUTABLE)
-            message(FATAL_ERROR "BuildProtobuf.cmake failed to build protobuf")
-        endif()
-
-        message(STATUS "Protobuf built successfully via BuildProtobuf.cmake")
-        message(STATUS "Protobuf include dirs: ${PROTOBUF_INCLUDE_DIRS}")
-        message(STATUS "Protobuf libraries: ${PROTOBUF_LIBRARIES}")
-        message(STATUS "Protoc executable: ${PROTOBUF_PROTOC_EXECUTABLE}")
-    else()
-        # Fallback to built-in protobuf build logic
-        message(STATUS "BuildProtobuf.cmake not found, using built-in protobuf build logic...")
-
-        set(PROTOBUF_BUILD_DIR ${CMAKE_BINARY_DIR}/third_party/protobuf-build)
-        set(PROTOBUF_INSTALL_DIR ${CMAKE_BINARY_DIR}/third_party/protobuf-install)
-        set(PROTOBUF_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf)
-
-        # Check if protobuf is already built
-        if(EXISTS ${PROTOBUF_INSTALL_DIR}/bin/protoc${CMAKE_EXECUTABLE_SUFFIX} AND
-                EXISTS ${PROTOBUF_INSTALL_DIR}/include/google/protobuf/message.h)
-            message(STATUS "Found existing protobuf build at ${PROTOBUF_INSTALL_DIR}")
-        else()
-            # Build protobuf from source
-            message(STATUS "Building protobuf from source at ${PROTOBUF_SOURCE_DIR}")
-
-            if(NOT EXISTS ${PROTOBUF_SOURCE_DIR}/CMakeLists.txt)
-                message(FATAL_ERROR "Protobuf source not found at ${PROTOBUF_SOURCE_DIR}")
-            endif()
-
-            file(MAKE_DIRECTORY ${PROTOBUF_BUILD_DIR})
-
-            # Configure protobuf build
-            execute_process(
-                    COMMAND ${CMAKE_COMMAND} -G ${CMAKE_GENERATOR}
-                    -DCMAKE_INSTALL_PREFIX=${PROTOBUF_INSTALL_DIR}
-                    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-                    -Dprotobuf_BUILD_TESTS=OFF
-                    -Dprotobuf_BUILD_EXAMPLES=OFF
-                    -Dprotobuf_BUILD_PROTOC_BINARIES=ON
-                    -Dprotobuf_BUILD_SHARED_LIBS=OFF
-                    -Dprotobuf_WITH_ZLIB=OFF
-                    -Dprotobuf_WITH_RTTI=ON
-                    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-                    -Dprotobuf_INSTALL=ON
-                    ${PROTOBUF_SOURCE_DIR}
-                    WORKING_DIRECTORY ${PROTOBUF_BUILD_DIR}
-                    RESULT_VARIABLE PROTOBUF_CONFIGURE_RESULT
-            )
-
-            if(NOT PROTOBUF_CONFIGURE_RESULT EQUAL 0)
-                message(FATAL_ERROR "Failed to configure protobuf")
-            endif()
-
-            # Build protobuf
-            execute_process(
-                    COMMAND ${CMAKE_COMMAND} --build . --config ${CMAKE_BUILD_TYPE} --target install --parallel
-                    WORKING_DIRECTORY ${PROTOBUF_BUILD_DIR}
-                    RESULT_VARIABLE PROTOBUF_BUILD_RESULT
-            )
-
-            if(NOT PROTOBUF_BUILD_RESULT EQUAL 0)
-                message(FATAL_ERROR "Failed to build protobuf")
-            endif()
-
-            message(STATUS "Protobuf build completed successfully")
-        endif()
-
-        # Set protobuf variables - include both built and source headers
-        set(PROTOBUF_INCLUDE_DIRS
-                ${PROTOBUF_INSTALL_DIR}/include
-                ${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf/src
-        )
-        set(PROTOBUF_PROTOC_EXECUTABLE ${PROTOBUF_INSTALL_DIR}/bin/protoc${CMAKE_EXECUTABLE_SUFFIX})
-
-        # Find protobuf libraries automatically
-        find_library(PROTOBUF_LIBRARY
-                NAMES protobuf libprotobuf protobufd libprotobufd
-                PATHS ${PROTOBUF_INSTALL_DIR}/lib
-                NO_DEFAULT_PATH
-        )
-
-        find_library(PROTOC_LIBRARY
-                NAMES protoc libprotoc protocd libprotocd
-                PATHS ${PROTOBUF_INSTALL_DIR}/lib
-                NO_DEFAULT_PATH
-        )
-
-        if(NOT PROTOBUF_LIBRARY OR NOT PROTOC_LIBRARY)
-            message(FATAL_ERROR "Failed to find protobuf libraries in ${PROTOBUF_INSTALL_DIR}/lib")
-        endif()
-
-        # Find all absl libraries automatically
-        file(GLOB ALL_ABSL_LIBRARIES
-                LIST_DIRECTORIES false
-                "${PROTOBUF_INSTALL_DIR}/lib/libabsl_*.a"
-                "${PROTOBUF_INSTALL_DIR}/lib/absl_*.lib"
-        )
-
-        if(ALL_ABSL_LIBRARIES)
-            list(LENGTH ALL_ABSL_LIBRARIES ABSL_COUNT)
-            message(STATUS "Found ${ABSL_COUNT} absl libraries")
-        else()
-            message(STATUS "No absl libraries found in ${PROTOBUF_INSTALL_DIR}/lib")
-        endif()
-
-        # Find all utf8-related libraries (utf8_range, utf8_validity, etc.)
-        file(GLOB UTF8_LIBRARIES
-                LIST_DIRECTORIES false
-                "${PROTOBUF_INSTALL_DIR}/lib/libutf8*.a"
-                "${PROTOBUF_INSTALL_DIR}/lib/utf8*.lib"
-        )
-
-        if(UTF8_LIBRARIES)
-            list(LENGTH UTF8_LIBRARIES UTF8_COUNT)
-            message(STATUS "Found ${UTF8_COUNT} utf8 libraries: ${UTF8_LIBRARIES}")
-        else()
-            message(STATUS "No utf8 libraries found in ${PROTOBUF_INSTALL_DIR}/lib")
-        endif()
-
-        # Find all upb-related libraries
-        file(GLOB UPB_LIBRARIES
-                LIST_DIRECTORIES false
-                "${PROTOBUF_INSTALL_DIR}/lib/libupb*.a"
-                "${PROTOBUF_INSTALL_DIR}/lib/upb*.lib"
-        )
-
-        if(UPB_LIBRARIES)
-            list(LENGTH UPB_LIBRARIES UPB_COUNT)
-            message(STATUS "Found ${UPB_COUNT} upb libraries: ${UPB_LIBRARIES}")
-        else()
-            message(STATUS "No upb libraries found in ${PROTOBUF_INSTALL_DIR}/lib")
-        endif()
-
-        # Create a comprehensive list of all libraries
-        set(ALL_LIBRARIES
-                ${PROTOBUF_LIBRARY}
-                ${PROTOC_LIBRARY}
-                ${ALL_ABSL_LIBRARIES}
-                ${UTF8_LIBRARIES}
-                ${UPB_LIBRARIES}
-        )
-
-        # Set final protobuf libraries with ALL libraries found
-        set(PROTOBUF_LIBRARIES ${ALL_LIBRARIES})
-
-        # Debug output: show all libraries being linked
-        message(STATUS "=== Protobuf Library Link Information ===")
-        message(STATUS "Protobuf library: ${PROTOBUF_LIBRARY}")
-        message(STATUS "Protoc library: ${PROTOC_LIBRARY}")
-        message(STATUS "All absl libraries: ${ALL_ABSL_LIBRARIES}")
-        message(STATUS "UTF8 Range library: ${UTF8_RANGE_LIBRARY}")
-        message(STATUS "Total library count: ${CMAKE_LIST_LENGTH}")
-        foreach(LIB ${ALL_LIBRARIES})
-            message(STATUS "  -> ${LIB}")
-        endforeach()
-        message(STATUS "=============================================")
-
-        message(STATUS "Protobuf built successfully via built-in logic")
-        message(STATUS "Protobuf include dirs: ${PROTOBUF_INCLUDE_DIRS}")
-        message(STATUS "Protobuf libraries: ${PROTOBUF_LIBRARIES}")
-        message(STATUS "Protoc executable: ${PROTOBUF_PROTOC_EXECUTABLE}")
-    endif()
-else()
-    # Use pre-built protobuf from third_party/protobuf/cmake-build-debug (fallback)
-    message(STATUS "Using pre-built protobuf (auto-build disabled)...")
-    set(PROTOBUF_PROTOC_EXECUTABLE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf/cmake-build-debug/protoc${CMAKE_EXECUTABLE_SUFFIX}")
-    set(PROTOBUF_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf/src")
-
-    # Collect all absl static libraries from the pre-built protobuf
-    file(GLOB ALL_ABSL_LIBRARIES
-            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf/cmake-build-debug/_deps/absl-build/*/lib*.a"
-    )
-
-    # Also collect utf8_range and other third-party libraries
-    file(GLOB OTHER_LIBRARIES
-            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf/cmake-build-debug/_deps/*/lib*.a"
-    )
-
-    set(PROTOBUF_LIBRARIES
-            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf/cmake-build-debug/libprotobufd.a"
-            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf/cmake-build-debug/libprotocd.a"
-            ${ALL_ABSL_LIBRARIES}
-            ${OTHER_LIBRARIES}
-    )
-
-    # Debug output for fallback path
-    message(STATUS "=== Fallback Protobuf Library Information ===")
-    message(STATUS "Abseil libraries found: ${ALL_ABSL_LIBRARIES}")
-    message(STATUS "Other libraries found: ${OTHER_LIBRARIES}")
-    message(STATUS "Total libraries for fallback: ${CMAKE_LIST_LENGTH}")
-    foreach(LIB ${PROTOBUF_LIBRARIES})
-        message(STATUS "  -> ${LIB}")
-    endforeach()
-    message(STATUS "============================================")
-endif()
-
-# Verify protoc is available
-if(NOT EXISTS ${PROTOBUF_PROTOC_EXECUTABLE})
-    message(FATAL_ERROR "Protoc executable not found at: ${PROTOBUF_PROTOC_EXECUTABLE}")
-endif()
-
-message(STATUS "Using protoc: ${PROTOBUF_PROTOC_EXECUTABLE}")
-message(STATUS "Protobuf include dirs: ${PROTOBUF_INCLUDE_DIRS}")
-message(STATUS "Protobuf libraries: ${PROTOBUF_LIBRARIES}")
-
-# Find Threads
+# 查找线程库
 find_package(Threads REQUIRED)
 
-# Add protobuf include directories
-include_directories(${PROTOBUF_INCLUDE_DIRS})
-
-# LLVM and LLDB configuration
-# Try to download LLVM if not present
+# LLVM 和 LLDB 配置
+# 如果不存在则尝试下载 LLVM
 include(DownloadLLVM)
 download_llvm()
 
-# Add include directories for LLVM/LLDB headers
+# 添加 LLVM/LLDB 头文件的包目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/llvm-project/llvm/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/llvm-project/lldb/include)
 
-# Protobuf compilation
-set(PROTO_FILES
-        schema/event.proto
-        schema/model.proto
-        schema/request.proto
-        schema/response.proto
-)
 
-# Create generated directory
-set(GENERATED_PROTO_DIR ${CMAKE_BINARY_DIR}/generated/proto)
-file(MAKE_DIRECTORY ${GENERATED_PROTO_DIR})
-
-# Auto-generate protobuf files with dependency checking
-message(STATUS "Setting up automatic protobuf generation...")
-
-# Function to check if proto file is newer than generated files
-function(is_proto_newer PROTO_FILE HEADER_FILE SOURCE_FILE RESULT_VAR)
-    set(${RESULT_VAR} FALSE PARENT_SCOPE)
-
-    if(NOT EXISTS ${HEADER_FILE} OR NOT EXISTS ${SOURCE_FILE})
-        set(${RESULT_VAR} TRUE PARENT_SCOPE)
-        return()
-    endif()
-
-    # Get modification times
-    file(TIMESTAMP ${PROTO_FILE} PROTO_TIME "%s")
-    file(TIMESTAMP ${HEADER_FILE} HEADER_TIME "%s")
-    file(TIMESTAMP ${SOURCE_FILE} SOURCE_TIME "%s")
-
-    # Check if proto file is newer than either generated file
-    if(PROTO_TIME GREATER HEADER_TIME OR PROTO_TIME GREATER SOURCE_TIME)
-        set(${RESULT_VAR} TRUE PARENT_SCOPE)
-    endif()
-endfunction()
-
-# Generate protobuf files with automatic re-generation
-set(NEED_REGENERATION FALSE)
-
-# Check all proto files for updates
-foreach(PROTO_FILE ${PROTO_FILES})
-    get_filename_component(PROTO_NAME ${PROTO_FILE} NAME_WE)
-    set(PROTO_HEADER ${GENERATED_PROTO_DIR}/${PROTO_NAME}.pb.h)
-    set(PROTO_SOURCE ${GENERATED_PROTO_DIR}/${PROTO_NAME}.pb.cc)
-
-    is_proto_newer(${CMAKE_SOURCE_DIR}/${PROTO_FILE} ${PROTO_HEADER} ${PROTO_SOURCE} SHOULD_REBUILD)
-
-    if(SHOULD_REBUILD)
-        set(NEED_REGENERATION TRUE)
-        break()
-    endif()
-endforeach()
-
-if(NEED_REGENERATION)
-    message(STATUS "Detected changes in proto files, regenerating...")
-
-    # Clear generated directory to ensure clean rebuild
-    file(REMOVE_RECURSE ${GENERATED_PROTO_DIR})
-    file(MAKE_DIRECTORY ${GENERATED_PROTO_DIR})
-
-    # Generate all protobuf files
-    foreach(PROTO_FILE ${PROTO_FILES})
-        get_filename_component(PROTO_NAME ${PROTO_FILE} NAME_WE)
-        message(STATUS "Generating ${PROTO_NAME}.pb.h and ${PROTO_NAME}.pb.cc...")
-
-        # Execute protoc at configure time
-        execute_process(
-                COMMAND ${PROTOBUF_PROTOC_EXECUTABLE}
-                --proto_path=${CMAKE_SOURCE_DIR}/schema
-                --cpp_out=${GENERATED_PROTO_DIR}
-                ${CMAKE_SOURCE_DIR}/${PROTO_FILE}
-                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-                RESULT_VARIABLE PROTOC_RESULT
-                ERROR_VARIABLE PROTOC_ERROR
-                OUTPUT_VARIABLE PROTOC_OUTPUT
-                ERROR_STRIP_TRAILING_WHITESPACE
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
-
-        if(NOT PROTOC_RESULT EQUAL 0)
-            message(FATAL_ERROR "Failed to generate protobuf for ${PROTO_FILE}: ${PROTOC_ERROR}")
-        endif()
-    endforeach()
-
-    message(STATUS "All protobuf files regenerated successfully in: ${GENERATED_PROTO_DIR}")
-else()
-    message(STATUS "Proto files are up to date, skipping generation")
-endif()
-
-# Collect all generated protobuf files
-foreach(PROTO_FILE ${PROTO_FILES})
-    get_filename_component(PROTO_NAME ${PROTO_FILE} NAME_WE)
-    set(PROTO_SRCS ${GENERATED_PROTO_DIR}/${PROTO_NAME}.pb.cc)
-    set(PROTO_HDRS ${GENERATED_PROTO_DIR}/${PROTO_NAME}.pb.h)
-
-    # Verify generated files exist
-    if(NOT EXISTS ${PROTO_SRCS} OR NOT EXISTS ${PROTO_HDRS})
-        message(FATAL_ERROR "Generated protobuf files not found for ${PROTO_FILE}")
-    endif()
-
-    list(APPEND ALL_PROTO_SRCS ${PROTO_SRCS})
-    list(APPEND ALL_PROTO_HDRS ${PROTO_HDRS})
-endforeach()
-
-message(STATUS "Collected protobuf source files: ${ALL_PROTO_SRCS}")
-message(STATUS "Collected protobuf header files: ${ALL_PROTO_HDRS}")
-
-# Add build-time regeneration target for manual regeneration
-add_custom_target(regenerate_protos
-        COMMAND ${CMAKE_COMMAND} -E echo "Force regenerating all protobuf files..."
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${GENERATED_PROTO_DIR}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PROTO_DIR}
-        COMMAND ${PROTOBUF_PROTOC_EXECUTABLE}
-        --proto_path=${CMAKE_SOURCE_DIR}/schema
-        --cpp_out=${GENERATED_PROTO_DIR}
-        ${PROTO_FILES}
-        COMMENT "Force regenerating all protobuf files"
-        VERBATIM
-)
-
-# Add custom target to rebuild protobuf from source
-add_custom_target(rebuild_protobuf
-        COMMAND ${CMAKE_COMMAND} -E echo "Rebuilding protobuf from source..."
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/third_party/protobuf-build
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/third_party/protobuf-install
-        COMMENT "Rebuilding protobuf from source (will trigger CMake reconfigure)"
-)
-
-# Make regenerate_protos depend on rebuild_protobuf for complete rebuild
-add_dependencies(regenerate_protos rebuild_protobuf)
-
-# Add the generated directory to include paths
-include_directories(${GENERATED_PROTO_DIR})
-
-# Source files
+# 源文件
 set(CORE_SOURCES
         src/core/BreakpointManager.cpp
 
@@ -463,7 +134,7 @@ set(CLIENT_SOURCES
         src/client/DebuggerClientEvents.cpp
 )
 
-# Collect all sources (now including protobuf sources)
+# 收集所有源文件（现在包括 protobuf 源文件）
 set(ALL_SOURCES
         ${CORE_SOURCES}
         ${PROTOCOL_SOURCES}
@@ -474,11 +145,11 @@ set(ALL_SOURCES
 )
 
 # ============================================
-# Determine output suffix based on platform
+# 根据平台确定输出后缀
 # ============================================
-# Check if toolchain file set these variables
+# 检查工具链文件是否设置了这些变量
 if(NOT DEFINED CANGJIE_OUTPUT_SUFFIX)
-    # Auto-detect platform if not set by toolchain file
+    # 如果工具链文件未设置，则自动检测平台
     if(WIN32)
         set(CANGJIE_TARGET_OS "windows")
     elseif(APPLE)
@@ -487,7 +158,7 @@ if(NOT DEFINED CANGJIE_OUTPUT_SUFFIX)
         set(CANGJIE_TARGET_OS "linux")
     endif()
 
-    # Detect architecture
+    # 检测架构
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
         set(CANGJIE_TARGET_ARCH "arm64")
     elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "armv7|arm")
@@ -504,77 +175,82 @@ if(NOT DEFINED CANGJIE_OUTPUT_SUFFIX)
 endif()
 
 message(STATUS "====================================")
-message(STATUS "Target Platform Configuration:")
-message(STATUS "  OS: ${CANGJIE_TARGET_OS}")
-message(STATUS "  Architecture: ${CANGJIE_TARGET_ARCH}")
-message(STATUS "  Output suffix: ${CANGJIE_OUTPUT_SUFFIX}")
+message(STATUS "目标平台配置:")
+message(STATUS "  操作系统: ${CANGJIE_TARGET_OS}")
+message(STATUS "  架构: ${CANGJIE_TARGET_ARCH}")
+message(STATUS "  输出后缀: ${CANGJIE_OUTPUT_SUFFIX}")
 message(STATUS "====================================")
 
-# Create single executable: CangJieLLDBAdapter_<os>_<arch>
+# 创建单个可执行文件: CangJieLLDBAdapter_<os>_<arch>
 set(EXECUTABLE_NAME "CangJieLLDBAdapter_${CANGJIE_OUTPUT_SUFFIX}")
 add_executable(${EXECUTABLE_NAME}
         src/main.cpp
         ${ALL_SOURCES}
 )
 
-# Set C++17 standard
+# 设置 C++17 标准
 set_property(TARGET ${EXECUTABLE_NAME} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${EXECUTABLE_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
 
-# Note: Do NOT define PROTOBUF_USE_DLLS - let protobuf use its default settings
-# The generated code must match the library's compilation settings
+# 注意：不要定义 PROTOBUF_USE_DLLS - 让 protobuf 使用其默认设置
+# 生成的代码必须与库的编译设置匹配
 
-# Suppress warnings in protobuf generated files and includes
+# 抑制 protobuf 生成文件和包含文件中的警告
 foreach(PROTO_SRC ${ALL_PROTO_SRCS})
-    # Add warning suppression for protobuf generated files
+    # 为 protobuf 生成文件添加警告抑制
     set_source_files_properties(${PROTO_SRC} PROPERTIES
             COMPILE_OPTIONS "-Wno-sign-compare -Wno-unused-parameter"
     )
 endforeach()
 
-# Also suppress warnings for protobuf headers when compiling other files
+# 同时在编译其他文件时抑制 protobuf 头文件的警告
 target_compile_options(${EXECUTABLE_NAME} PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-Wno-sign-compare>
 )
 
-# Link libraries with proper grouping for static libraries
-if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # Use --whole-archive to force linking all symbols from static libraries
-    # This prevents Release mode optimization from removing symbols like ThreadSafeArena::thread_cache()
+
+# 链接 protobuf 和其他库（使用 CMake targets）
+# protobuf::libprotobuf target 自动包含所有依赖（absl、utf8_range、upb 等）
+target_link_libraries(${EXECUTABLE_NAME}
+    PRIVATE
+    protobuf::libprotobuf  # 自动处理所有 protobuf 依赖
+    Threads::Threads
+)
+
+# 在 Linux/Unix 上添加 Abseil 所需的系统库
+# 这些是依赖于 Abseil 的现代 Protobuf (3.21+/4.x) 所需的
+if(UNIX AND NOT APPLE)
     target_link_libraries(${EXECUTABLE_NAME}
-            -Wl,--whole-archive
-            ${PROTOBUF_LIBRARIES}
-            -Wl,--no-whole-archive
-            Threads::Threads
+        PRIVATE
+        atomic  # absl::base 原子操作所需
+        rt      # absl::synchronization POSIX 实时所需
     )
-else()
-    target_link_libraries(${EXECUTABLE_NAME}
-            ${PROTOBUF_LIBRARIES}
-            Threads::Threads
-    )
+    message(STATUS "已添加 Linux 系统库: atomic, rt (Abseil 所需)")
 endif()
 
-# Add Windows-specific libraries if needed
+# 如果需要，添加 Windows 特定的库
 if(WIN32)
     target_link_libraries(${EXECUTABLE_NAME}
-            kernel32     # For ConPTY functions (CreatePseudoConsole, etc.)
-            dbghelp      # For symbolization functions like SymInitialize, SymFromAddr
-            psapi        # For process API functions
-            wsock32      # For socket functions
-            ws2_32       # For Windows Sockets 2
-            bcrypt       # For BCrypt cryptographic functions (used by absl random)
+        PRIVATE
+            kernel32     # ConPTY 函数所需 (CreatePseudoConsole 等)
+            dbghelp      # 符号化函数所需 (SymInitialize, SymFromAddr)
+            psapi        # 进程 API 函数所需
+            wsock32      # socket 函数所需
+            ws2_32       # Windows Sockets 2 所需
+            bcrypt       # BCrypt 加密函数所需 (absl random 使用)
     )
 endif()
 
-# LLDB 动态链接配置 - 根据平台和架构使用不同的库文件
+# LLDB 动态链接配置 - 根据平台和架构���用不同的库文件
 if(WIN32)
     # Windows 平台：使用 liblldb_windows_<arch>.dll
     set(LLDB_LIB_NAME "liblldb_${CANGJIE_OUTPUT_SUFFIX}.dll")
     set(LLDB_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/${LLDB_LIB_NAME}")
 
-    message(STATUS "Windows LLDB library: ${LLDB_LIB_PATH}")
+    message(STATUS "Windows LLDB 库: ${LLDB_LIB_PATH}")
 
     target_link_libraries(${EXECUTABLE_NAME}
+        PRIVATE
             ${LLDB_LIB_PATH}
             psapi
             ws2_32
@@ -585,24 +261,44 @@ elseif(APPLE)
     set(LLDB_LIB_NAME "liblldb_${CANGJIE_OUTPUT_SUFFIX}.dylib")
     set(LLDB_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/${LLDB_LIB_NAME}")
 
-    message(STATUS "macOS LLDB library: ${LLDB_LIB_PATH}")
+    message(STATUS "macOS LLDB 库: ${LLDB_LIB_PATH}")
 
     target_link_libraries(${EXECUTABLE_NAME}
+        PRIVATE
             ${LLDB_LIB_PATH}
     )
 else()
     # Linux 平台：使用 liblldb_linux_<arch>.so
     set(LLDB_LIB_NAME "liblldb_${CANGJIE_OUTPUT_SUFFIX}.so")
     set(LLDB_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/${LLDB_LIB_NAME}")
+    set(LLDB_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib")
 
-    message(STATUS "Linux LLDB library: ${LLDB_LIB_PATH}")
+    message(STATUS "Linux LLDB 库: ${LLDB_LIB_PATH}")
+    message(STATUS "Linux LLDB 库目录: ${LLDB_LIB_DIR}")
+
+    # 设置 RPATH，以便运行时能找到依赖的共享库
+    set_target_properties(${EXECUTABLE_NAME} PROPERTIES
+        BUILD_WITH_INSTALL_RPATH FALSE
+        INSTALL_RPATH "${LLDB_LIB_DIR}:\$ORIGIN/../lib:\$ORIGIN"
+        INSTALL_RPATH_USE_LINK_PATH TRUE
+    )
+
+    # 设置链接时的库搜索路径
+    link_directories(${LLDB_LIB_DIR})
+
+    # 添加链接器选项：允许共享库有未定义的符号（运行时解析）
+    target_link_options(${EXECUTABLE_NAME} PRIVATE
+        "-Wl,--allow-shlib-undefined"
+    )
 
     target_link_libraries(${EXECUTABLE_NAME}
+        PRIVATE
             ${LLDB_LIB_PATH}
+            dl  # 动态链接库加载
     )
 endif()
 
-# Installation
+# 安装
 install(TARGETS ${EXECUTABLE_NAME}
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib
@@ -612,11 +308,11 @@ install(TARGETS ${EXECUTABLE_NAME}
 install(FILES ${ALL_PROTO_HDRS} DESTINATION include/cangjie/debugger)
 install(DIRECTORY include/cangjie/debugger DESTINATION include)
 
-# Testing
+# 测试
 enable_testing()
 
 
-# Documentation
+# 文档
 find_package(Doxygen QUIET)
 if(DOXYGEN_FOUND)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in
@@ -624,11 +320,11 @@ if(DOXYGEN_FOUND)
     add_custom_target(doc
             ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            COMMENT "Generating API documentation with Doxygen" VERBATIM
+            COMMENT "使用 Doxygen 生成 API 文档" VERBATIM
     )
 endif()
 
-# Package configuration
+# 包配置
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/CangjieDebuggerConfigVersion.cmake"
@@ -654,9 +350,9 @@ install(FILES
 if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     # 分类说明DLL的用途
     message(STATUS "================================")
-    message(STATUS "DLL Dependency Configuration (Debug Mode Only):")
-    message(STATUS "  Main executable: Statically links libstdc++ and libgcc")
-    message(STATUS "  Third-party DLLs: Keep their own dynamic dependencies")
+    message(STATUS "DLL 依赖配置（仅限 Debug 模式）:")
+    message(STATUS "  主可执行文件: 静态链接 libstdc++ 和 libgcc")
+    message(STATUS "  第三方 DLLs: 保留它们自己的动态依赖")
     message(STATUS "================================")
 
     # LLVM/LLDB 相关 DLLs（必需）
@@ -704,23 +400,23 @@ if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     ${DLL_SOURCE}
                     ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${DLL_FILE}
-                    COMMENT "Copying ${DLL_FILE} to output directory (Debug mode)"
+                    COMMENT "复制 ${DLL_FILE} 到输出目录（Debug 模式）"
             )
         else()
-            message(WARNING "DLL not found: ${DLL_SOURCE}")
+            message(WARNING "未找到 DLL: ${DLL_SOURCE}")
         endif()
     endforeach()
 
     message(STATUS "================================")
-    message(STATUS "DLL Copy Configuration:")
-    message(STATUS "  Build Type: Debug (DLLs will be copied)")
-    message(STATUS "  Total DLLs to copy: ${REQUIRED_DLLS}")
-    message(STATUS "  Output directory: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    message(STATUS "DLL 复制配置:")
+    message(STATUS "  构建类型: Debug (将复制 DLLs)")
+    message(STATUS "  需要复制的 DLLs 总数: ${REQUIRED_DLLS}")
+    message(STATUS "  输出目录: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
     message(STATUS "================================")
 elseif(WIN32)
     message(STATUS "================================")
-    message(STATUS "DLL Copy Configuration:")
-    message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE} (DLLs will NOT be copied)")
-    message(STATUS "  Note: DLLs are only copied in Debug mode")
+    message(STATUS "DLL 复制配置:")
+    message(STATUS "  构建类型: ${CMAKE_BUILD_TYPE} (不会复制 DLLs)")
+    message(STATUS "  注意: 仅在 Debug 模式下复制 DLLs")
     message(STATUS "================================")
 endif()
