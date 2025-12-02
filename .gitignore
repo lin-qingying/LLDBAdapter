@@ -1,3 +1,8 @@
-/third_party/**
+# Allow third_party submodules but ignore DLL files and build artifacts
+/third_party/*.dll
+/third_party/*.lib
+/third_party/*.a
+/third_party/*.so
+/third_party/*.dylib
 /output/**
 /output/
