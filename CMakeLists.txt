@@ -566,20 +566,26 @@ if(WIN32)
     )
 endif()
 
-# LLDB dynamic linking configuration
+# LLDB 动态链接配置
 if(WIN32)
+    # Windows 平台：使用 liblldb.dll
     target_link_libraries(${EXECUTABLE_NAME}
-            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/liblldb.dll
-#            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libclang.dll
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/liblldb.dll
+
             psapi
             ws2_32
             wsock32
     )
+elseif(APPLE)
+    # macOS 平台：使用 liblldb.dylib
+    target_link_libraries(${EXECUTABLE_NAME}
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/liblldb.dylib
+    )
 else()
-    find_library(LLDB_LIB lldb)
-    if(LLDB_LIB)
-        target_link_libraries(${EXECUTABLE_NAME} ${LLDB_LIB})
-    endif()
+    # Linux 平台：使用 liblldb.so
+    target_link_libraries(${EXECUTABLE_NAME}
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lib/liblldb.so
+    )
 endif()
 
 # Installation
