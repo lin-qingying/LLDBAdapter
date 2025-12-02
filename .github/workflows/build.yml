@@ -213,7 +213,7 @@ jobs:
           cmake -B build `
             -G Ninja `
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
-            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd64-llvm-mingw.cmake
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd64.cmake
 
       - name: Build
         shell: pwsh
