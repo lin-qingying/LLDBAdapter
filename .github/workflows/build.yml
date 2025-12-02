@@ -209,12 +209,7 @@ jobs:
 
       - name: Configure CMake
         shell: pwsh
-        run: |
-          $toolchain = "cmake/toolchains/windows-amd64.cmake"
-          $buildType = "${{ env.BUILD_TYPE }}"
-          Write-Host "Configuring with toolchain: $toolchain"
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=$buildType -DCMAKE_TOOLCHAIN_FILE=$toolchain
-
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd64.cmake
       - name: Build
         shell: pwsh
         run: cmake --build build --config ${{ env.BUILD_TYPE }}
