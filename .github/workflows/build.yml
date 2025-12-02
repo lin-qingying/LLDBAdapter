@@ -199,6 +199,30 @@ jobs:
       - name: Setup Ninja
         uses: seanmiddleditch/gha-setup-ninja@v5
 
+      - name: Setup ccache
+        shell: pwsh
+        run: |
+          choco install ccache -y
+          ccache --version
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\ccache
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
+      - name: Cache protobuf build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/third_party/protobuf-build
+            build/third_party/protobuf-install
+          key: ${{ runner.os }}-protobuf-${{ hashFiles('third_party/protobuf/**') }}
+          restore-keys: |
+            ${{ runner.os }}-protobuf-
+
       - name: Verify tools
         shell: pwsh
         run: |
@@ -206,14 +230,19 @@ jobs:
           clang --version
           Write-Host "`nNinja version:"
           ninja --version
+          Write-Host "`nCcache version:"
+          ccache --version
 
       - name: Configure CMake
+        shell: pwsh
         run: |
-          export PATH="$(brew --prefix)/opt/ccache/libexec:$PATH"
-          cmake -B build \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd.cmake \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          cmake -B build `
+            -G Ninja `
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd64.cmake `
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
+            -DCMAKE_C_COMPILER=clang `
+            -DCMAKE_CXX_COMPILER=clang++ `
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache `
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
