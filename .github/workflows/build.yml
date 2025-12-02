@@ -182,9 +182,10 @@ jobs:
       - name: Download LLVM-MinGW
         shell: pwsh
         run: |
-          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/20240907/llvm-mingw-20240907-msvcrt-x86_64.zip"
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/20251021/llvm-mingw-20251021-ucrt-x86_64.zip"
           Invoke-WebRequest -Uri $url -OutFile "llvm-mingw.zip"
           Expand-Archive llvm-mingw.zip -DestinationPath llvm-mingw
+          
 
       - name: Add LLVM-MinGW to PATH
         shell: pwsh
