@@ -185,12 +185,21 @@ jobs:
           $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/20251021/llvm-mingw-20251021-ucrt-x86_64.zip"
           Invoke-WebRequest -Uri $url -OutFile "llvm-mingw.zip"
           Expand-Archive llvm-mingw.zip -DestinationPath llvm-mingw
-          
 
       - name: Add LLVM-MinGW to PATH
         shell: pwsh
         run: |
-          echo "${{ github.workspace }}\llvm-mingw\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $llvmPath = "${{ github.workspace }}\llvm-mingw\llvm-mingw-20251021-ucrt-x86_64\bin"
+          echo $llvmPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "Added to PATH: $llvmPath"
+
+      - name: Verify LLVM-MinGW installation
+        shell: pwsh
+        run: |
+          Write-Host "Checking clang version:"
+          clang --version
+          Write-Host "`nChecking clang++ version:"
+          clang++ --version
 
       - name: Setup CMake
         uses: lukka/get-cmake@latest
@@ -204,14 +213,7 @@ jobs:
           cmake -B build `
             -G Ninja `
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
-            -DCMAKE_C_COMPILER=clang `
-            -DCMAKE_CXX_COMPILER=clang++ `
-            -DCMAKE_RC_COMPILER=llvm-rc `
-            -DCMAKE_AR=llvm-ar `
-            -DCMAKE_LINKER=lld-link `
-            -DCMAKE_C_COMPILER_TARGET=x86_64-w64-mingw32 `
-            -DCMAKE_CXX_COMPILER_TARGET=x86_64-w64-mingw32 `
-            -DCMAKE_EXE_LINKER_FLAGS="/machine:x64"
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd64-llvm-mingw.cmake
 
       - name: Build
         shell: pwsh
