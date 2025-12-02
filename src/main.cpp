@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
 
 
 
-    Cangjie::Debugger::Logger::Initialize("cangjie_debugger.log", Cangjie::Debugger::LogLevel::INFO, true);
+    Cangjie::Debugger::Logger::Initialize("", Cangjie::Debugger::LogLevel::INFO, true);
     LOG_INFO("CangJie LLDB Frontend starting...");
 
     std::cout << "CangJie LLDB Frontend v1.0.0" << std::endl;

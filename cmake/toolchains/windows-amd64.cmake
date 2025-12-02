@@ -48,10 +48,15 @@ endif()
 add_definitions(-DWIN32 -D_WIN32 -DWINDOWS)
 add_definitions(-DUNICODE -D_UNICODE)
 
+# Define minimum supported Windows version (Windows 7) for better compatibility
+# This prevents linking against newer APIs like clock_gettime64 that don't exist on older Windows
+add_definitions(-D_WIN32_WINNT=0x0601 -DWINVER=0x0601)
+
 message(STATUS "====================================")
 message(STATUS "Native Windows AMD64 toolchain:")
 message(STATUS "  System: Windows")
 message(STATUS "  Processor: AMD64 (x86-64)")
+message(STATUS "  Target Windows: 7+ (0x0601)")
 message(STATUS "  Output suffix: ${CANGJIE_OUTPUT_SUFFIX}")
 if(MSVC)
     message(STATUS "  Compiler: MSVC")
