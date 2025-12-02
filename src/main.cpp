@@ -28,14 +28,19 @@
 #include <iostream>
 #include <string>
 #include <vector>
+
+#if WIN32
 #include <io.h>
+#endif
 #include <stdio.h>
 
 int main(int argc, char** argv) {
+
+#if WIN32
     // 检查适配器自己的 stdout 是不是终端
     int result = _isatty(_fileno(stdout));
-    printf("Adapter stdout isatty: %d\n", result);  // 0 = 管道，1 = 终端
-
+    LOG_INFO("Adapter stdout isatty: %d\n", result);  // 0 = 管道，1 = 终端
+#endif
 
 
     Cangjie::Debugger::Logger::Initialize("cangjie_debugger.log", Cangjie::Debugger::LogLevel::INFO, true);

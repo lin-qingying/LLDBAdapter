@@ -75,14 +75,23 @@ jobs:
           ninja -C build
 
       - name: Strip binary
-        run: strip build/output/${{ env.PROJECT_NAME }} || strip output/${{ env.PROJECT_NAME }} || true
+        run: |
+          if [ -f "build/output/${{ env.PROJECT_NAME }}_linux_amd64" ]; then
+            strip build/output/${{ env.PROJECT_NAME }}_linux_amd64
+          elif [ -f "output/${{ env.PROJECT_NAME }}_linux_amd64" ]; then
+            strip output/${{ env.PROJECT_NAME }}_linux_amd64
+          fi
 
       - name: Rename binary
         run: |
-          if [ -f "build/output/${{ env.PROJECT_NAME }}" ]; then
-            cp build/output/${{ env.PROJECT_NAME }} ${{ env.PROJECT_NAME }}_linux_amd64
-          elif [ -f "output/${{ env.PROJECT_NAME }}" ]; then
-            cp output/${{ env.PROJECT_NAME }} ${{ env.PROJECT_NAME }}_linux_amd64
+          if [ -f "build/output/${{ env.PROJECT_NAME }}_linux_amd64" ]; then
+            cp build/output/${{ env.PROJECT_NAME }}_linux_amd64 ${{ env.PROJECT_NAME }}_linux_amd64
+          elif [ -f "output/${{ env.PROJECT_NAME }}_linux_amd64" ]; then
+            cp output/${{ env.PROJECT_NAME }}_linux_amd64 ${{ env.PROJECT_NAME }}_linux_amd64
+          else
+            echo "Error: Binary not found"
+            ls -la build/output/ || ls -la output/ || true
+            exit 1
           fi
 
       - name: Upload artifact
@@ -152,14 +161,23 @@ jobs:
           ninja -C build
 
       - name: Strip binary
-        run: aarch64-linux-gnu-strip build/output/${{ env.PROJECT_NAME }} || aarch64-linux-gnu-strip output/${{ env.PROJECT_NAME }} || true
+        run: |
+          if [ -f "build/output/${{ env.PROJECT_NAME }}_linux_arm64" ]; then
+            aarch64-linux-gnu-strip build/output/${{ env.PROJECT_NAME }}_linux_arm64
+          elif [ -f "output/${{ env.PROJECT_NAME }}_linux_arm64" ]; then
+            aarch64-linux-gnu-strip output/${{ env.PROJECT_NAME }}_linux_arm64
+          fi
 
       - name: Rename binary
         run: |
-          if [ -f "build/output/${{ env.PROJECT_NAME }}" ]; then
-            cp build/output/${{ env.PROJECT_NAME }} ${{ env.PROJECT_NAME }}_linux_arm64
-          elif [ -f "output/${{ env.PROJECT_NAME }}" ]; then
-            cp output/${{ env.PROJECT_NAME }} ${{ env.PROJECT_NAME }}_linux_arm64
+          if [ -f "build/output/${{ env.PROJECT_NAME }}_linux_arm64" ]; then
+            cp build/output/${{ env.PROJECT_NAME }}_linux_arm64 ${{ env.PROJECT_NAME }}_linux_arm64
+          elif [ -f "output/${{ env.PROJECT_NAME }}_linux_arm64" ]; then
+            cp output/${{ env.PROJECT_NAME }}_linux_arm64 ${{ env.PROJECT_NAME }}_linux_arm64
+          else
+            echo "Error: Binary not found"
+            ls -la build/output/ || ls -la output/ || true
+            exit 1
           fi
 
       - name: Upload artifact
@@ -234,15 +252,24 @@ jobs:
         shell: pwsh
         run: |
           $sourcePaths = @(
+            "build/output/${{ env.PROJECT_NAME }}_windows_amd64.exe",
+            "output/${{ env.PROJECT_NAME }}_windows_amd64.exe",
             "build/output/${{ env.PROJECT_NAME }}.exe",
             "output/${{ env.PROJECT_NAME }}.exe",
             "build/${{ env.BUILD_TYPE }}/${{ env.PROJECT_NAME }}.exe"
           )
           foreach ($path in $sourcePaths) {
             if (Test-Path $path) {
+              Write-Host "Found binary at: $path"
               Copy-Item $path "${{ env.PROJECT_NAME }}_windows_amd64.exe"
               break
             }
+          }
+          if (-not (Test-Path "${{ env.PROJECT_NAME }}_windows_amd64.exe")) {
+            Write-Host "Error: Binary not found in any of the expected locations"
+            Write-Host "Listing build directory contents:"
+            Get-ChildItem -Recurse build | Where-Object { $_.Extension -eq ".exe" }
+            exit 1
           }
 
       - name: Upload artifact
@@ -302,14 +329,23 @@ jobs:
           cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
 
       - name: Strip binary
-        run: strip build/output/${{ env.PROJECT_NAME }} || strip output/${{ env.PROJECT_NAME }} || true
+        run: |
+          if [ -f "build/output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
+            strip build/output/${{ env.PROJECT_NAME }}_macos_amd64
+          elif [ -f "output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
+            strip output/${{ env.PROJECT_NAME }}_macos_amd64
+          fi
 
       - name: Rename binary
         run: |
-          if [ -f "build/output/${{ env.PROJECT_NAME }}" ]; then
-            cp build/output/${{ env.PROJECT_NAME }} ${{ env.PROJECT_NAME }}_macos_amd64
-          elif [ -f "output/${{ env.PROJECT_NAME }}" ]; then
-            cp output/${{ env.PROJECT_NAME }} ${{ env.PROJECT_NAME }}_macos_amd64
+          if [ -f "build/output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
+            cp build/output/${{ env.PROJECT_NAME }}_macos_amd64 ${{ env.PROJECT_NAME }}_macos_amd64
+          elif [ -f "output/${{ env.PROJECT_NAME }}_macos_amd64" ]; then
+            cp output/${{ env.PROJECT_NAME }}_macos_amd64 ${{ env.PROJECT_NAME }}_macos_amd64
+          else
+            echo "Error: Binary not found"
+            ls -la build/output/ || ls -la output/ || true
+            exit 1
           fi
 
       - name: Upload artifact
@@ -369,14 +405,23 @@ jobs:
           cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
 
       - name: Strip binary
-        run: strip build/output/${{ env.PROJECT_NAME }} || strip output/${{ env.PROJECT_NAME }} || true
+        run: |
+          if [ -f "build/output/${{ env.PROJECT_NAME }}_macos_arm64" ]; then
+            strip build/output/${{ env.PROJECT_NAME }}_macos_arm64
+          elif [ -f "output/${{ env.PROJECT_NAME }}_macos_arm64" ]; then
+            strip output/${{ env.PROJECT_NAME }}_macos_arm64
+          fi
 
       - name: Rename binary
         run: |
-          if [ -f "build/output/${{ env.PROJECT_NAME }}" ]; then
-            cp build/output/${{ env.PROJECT_NAME }} ${{ env.PROJECT_NAME }}_macos_arm64
-          elif [ -f "output/${{ env.PROJECT_NAME }}" ]; then
-            cp output/${{ env.PROJECT_NAME }} ${{ env.PROJECT_NAME }}_macos_arm64
+          if [ -f "build/output/${{ env.PROJECT_NAME }}_macos_arm64" ]; then
+            cp build/output/${{ env.PROJECT_NAME }}_macos_arm64 ${{ env.PROJECT_NAME }}_macos_arm64
+          elif [ -f "output/${{ env.PROJECT_NAME }}_macos_arm64" ]; then
+            cp output/${{ env.PROJECT_NAME }}_macos_arm64 ${{ env.PROJECT_NAME }}_macos_arm64
+          else
+            echo "Error: Binary not found"
+            ls -la build/output/ || ls -la output/ || true
+            exit 1
           fi
 
       - name: Upload artifact
@@ -387,9 +432,8 @@ jobs:
           retention-days: 7
 
   # ============== Create Release ==============
-#  ,build-linux-amd64, build-linux-arm64,  build-macos-amd64, build-macos-arm64
   create-release:
-    needs: [build-windows-amd64]
+    needs: [build-windows-amd64,build-linux-amd64, build-linux-arm64,  build-macos-amd64, build-macos-arm64]
     runs-on: ubuntu-22.04
     if: startsWith(github.ref, 'refs/tags/v')
 

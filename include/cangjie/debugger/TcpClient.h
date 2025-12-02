@@ -12,17 +12,16 @@
 
 #ifdef _WIN32
 #include <winsock2.h>
+typedef SOCKET SOCKET_TYPE;
+#else
+typedef int SOCKET_TYPE;
+#endif
 
 namespace lldbprotobuf {
     class Request;
     class Event;
     class Response;
 }
-
-typedef SOCKET SOCKET_TYPE;
-#else
-typedef int SOCKET_TYPE;
-#endif
 
 namespace Cangjie {
 namespace Debugger {
