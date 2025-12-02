@@ -8,7 +8,7 @@ cmake_minimum_required(VERSION 3.16.3)
 
 project(CangjieDebugger VERSION 1.0.0 LANGUAGES CXX)
 
-# Set C++ standard
+# 设置 C++ 标准
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -31,17 +31,17 @@ if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     message(STATUS "================================")
 endif()
 
-# Build type
+# 构建类型
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Set output directory to 'output'
+# 设置输出目录为 'output'
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
 
-# For multi-config generators (like Visual Studio)
+# 多配置生成器（如 Visual Studio）
 foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
     string(TOUPPER ${CONFIG} CONFIG_UPPER)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${CMAKE_SOURCE_DIR}/output)
@@ -49,7 +49,7 @@ foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${CMAKE_SOURCE_DIR}/output)
 endforeach()
 
-# Compiler-specific options
+# 编译器特定选项
 if(MSVC)
     add_compile_options(/W4 /WX)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
@@ -57,27 +57,27 @@ else()
     add_compile_options(-Wall -Wextra -Werror)
 endif()
 
-# Export compile commands
+# 导出编译命令
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Include directories
+# 包含目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobuf/src/google)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
-# Find required packages
+# 查找所需的包
 find_package(PkgConfig)
 if(NOT PkgConfig_FOUND)
-    message(STATUS "pkg-config not found, proceeding without it")
+    message(STATUS "未找到 pkg-config，继续执行但不使用它")
     set(PKG_CONFIG_EXECUTABLE "")
 endif()
 
-# Include cmake modules
+# 包含 cmake 模块
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# Auto-build protobuf from local third_party source with fallback
-message(STATUS "Setting up automatic protobuf build...")
-set(PROTOBUF_AUTO_BUILD_ENABLED ON CACHE BOOL "Enable automatic protobuf build")
+# 从本地 third_party 源自动构建 protobuf（带回退机制）
+message(STATUS "设置自动 protobuf 构建...")
+set(PROTOBUF_AUTO_BUILD_ENABLED ON CACHE BOOL "启用自动 protobuf 构建")
 
 if(PROTOBUF_AUTO_BUILD_ENABLED)
     # Try to use existing BuildProtobuf.cmake first

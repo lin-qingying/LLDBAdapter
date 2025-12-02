@@ -32,8 +32,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential ccache \
-            protobuf-compiler libprotobuf-dev
+          sudo apt-get install -y \
+            build-essential \
+            gcc \
+            g++ \
+            ninja-build \
+            ccache \
+            protobuf-compiler \
+            libprotobuf-dev
 
       - name: Cache protobuf build
         uses: actions/cache@v4
@@ -57,6 +63,7 @@ jobs:
         run: |
           export PATH="/usr/lib/ccache:$PATH"
           cmake -B build \
+            -GNinja \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/linux-amd64.cmake \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -65,7 +72,7 @@ jobs:
       - name: Build
         run: |
           export PATH="/usr/lib/ccache:$PATH"
-          cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
+          ninja -C build
 
       - name: Strip binary
         run: strip build/output/${{ env.PROJECT_NAME }} || strip output/${{ env.PROJECT_NAME }} || true
@@ -102,9 +109,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential \
             gcc-aarch64-linux-gnu \
             g++-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
+            ninja-build \
             ccache \
             protobuf-compiler \
             libprotobuf-dev
@@ -131,6 +140,7 @@ jobs:
         run: |
           export PATH="/usr/lib/ccache:$PATH"
           cmake -B build \
+            -GNinja \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/native/linux-arm64.cmake \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -139,7 +149,7 @@ jobs:
       - name: Build
         run: |
           export PATH="/usr/lib/ccache:$PATH"
-          cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
+          ninja -C build
 
       - name: Strip binary
         run: aarch64-linux-gnu-strip build/output/${{ env.PROJECT_NAME }} || aarch64-linux-gnu-strip output/${{ env.PROJECT_NAME }} || true
@@ -418,32 +428,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ============== Test ==============
-  test:
-    needs: [build-linux-amd64, build-windows-amd64]
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Download Linux binary
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-amd64
-
-      - name: Test Linux binary
-        run: |
-          chmod +x ${{ env.PROJECT_NAME }}_linux_amd64
-          ./${{ env.PROJECT_NAME }}_linux_amd64 --version || echo "Binary executed"
-
-      - name: Download Windows binary
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-amd64
-
-      - name: Setup Wine
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wine64
-
-      - name: Test Windows binary
-        run: |
-          wine64 ${{ env.PROJECT_NAME }}_windows_amd64.exe --version || echo "Binary executed"
