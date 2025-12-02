@@ -36,7 +36,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 
 elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 
-    if (WIN32 AND NOT IS_LLVM_MINGW EQUAL -1)
+    if (WIN32#[[ AND NOT IS_LLVM_MINGW EQUAL -1]])
         # ====================================================
         # Windows + LLVM-MinGW Clang
         # 特点：
@@ -46,14 +46,14 @@ elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         # ====================================================
         message(STATUS "== 检测到 LLVM-MinGW Clang：使用 -static 完全静态链接 ==")
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
-
-    elseif (WIN32)
-        # ====================================================
-        # Windows + 普通 Clang（极少见）
-        # 处理方式类似 GCC（libstdc++）
-        # ====================================================
-        message(STATUS "== Windows 普通 Clang：使用 -static-libstdc++ -static-libgcc ==")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libstdc++ -static-libgcc")
+#
+#    elseif (WIN32)
+#        # ====================================================
+#        # Windows + 普通 Clang（极少见）
+#        # 处理方式类似 GCC（libstdc++）
+#        # ====================================================
+#        message(STATUS "== Windows 普通 Clang：使用 -static-libstdc++ -static-libgcc ==")
+#        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libstdc++ -static-libgcc")
 
     elseif (APPLE)
         # ====================================================
