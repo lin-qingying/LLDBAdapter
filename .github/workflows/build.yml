@@ -179,55 +179,41 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Download LLVM-MinGW
+        shell: pwsh
+        run: |
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/20240907/llvm-mingw-20240907-msvcrt-x86_64.zip"
+          Invoke-WebRequest -Uri $url -OutFile "llvm-mingw.zip"
+          Expand-Archive llvm-mingw.zip -DestinationPath llvm-mingw
+
+      - name: Add LLVM-MinGW to PATH
+        shell: pwsh
+        run: |
+          echo "${{ github.workspace }}\llvm-mingw\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Setup CMake
         uses: lukka/get-cmake@latest
 
-      - name: Setup MinGW
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-ccache
-            make
-
-      - name: Cache protobuf build
-        uses: actions/cache@v4
-        with:
-          path: |
-            build/third_party/protobuf-build
-            build/third_party/protobuf-install
-          key: ${{ runner.os }}-protobuf-${{ hashFiles('third_party/protobuf/**') }}
-          restore-keys: |
-            ${{ runner.os }}-protobuf-
-
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ${{ runner.os }}-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-
+      - name: Setup Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
 
       - name: Configure CMake
-        shell: msys2 {0}
+        shell: pwsh
         run: |
-          export CC=/mingw64/bin/gcc
-          export CXX=/mingw64/bin/g++
-          cmake -B build \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/windows-amd64.cmake \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCMAKE_C_COMPILER=/mingw64/bin/gcc.exe \
-            -DCMAKE_CXX_COMPILER=/mingw64/bin/g++.exe \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -G "Ninja"
+          cmake -B build `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
+            -DCMAKE_C_COMPILER=clang `
+            -DCMAKE_CXX_COMPILER=clang++ `
+            -DCMAKE_RC_COMPILER=llvm-rc `
+            -DCMAKE_AR=llvm-ar `
+            -DCMAKE_LINKER=lld-link `
+            -DCMAKE_C_COMPILER_TARGET=x86_64-w64-mingw32 `
+            -DCMAKE_CXX_COMPILER_TARGET=x86_64-w64-mingw32 `
+            -DCMAKE_EXE_LINKER_FLAGS="/machine:x64"
 
       - name: Build
-        shell: msys2 {0}
+        shell: pwsh
         run: cmake --build build --config ${{ env.BUILD_TYPE }}
 
       - name: Rename binary
@@ -260,6 +246,7 @@ jobs:
           name: windows-amd64
           path: ${{ env.PROJECT_NAME }}_windows_amd64.exe
           retention-days: 7
+
 
   # ============== macOS AMD64 ==============
   build-macos-amd64:

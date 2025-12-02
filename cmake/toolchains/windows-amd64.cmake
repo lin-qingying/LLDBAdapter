@@ -1,10 +1,8 @@
-
 # ============================================
-# Native compilation toolchain file
+# LLVM-MinGW toolchain file
 # Windows AMD64 (x86-64)
 # ============================================
 
-# Target system (native build)
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR AMD64)
 
@@ -13,54 +11,55 @@ set(CANGJIE_TARGET_OS "windows")
 set(CANGJIE_TARGET_ARCH "amd64")
 set(CANGJIE_OUTPUT_SUFFIX "windows_amd64")
 
-# For native Windows builds, use default compilers
-# MSVC will be auto-detected on Windows with Visual Studio
-# MinGW can be specified via CMAKE_C_COMPILER/CMAKE_CXX_COMPILER
+# -------------------------------
+# LLVM-MinGW compilers
+# -------------------------------
+# These executables come from:
+#   llvm-mingw/bin/clang.exe
+#   llvm-mingw/bin/clang++.exe
+#   llvm-mingw/bin/llvm-rc.exe
+#   llvm-mingw/bin/llvm-ar.exe
+#   llvm-mingw/bin/lld-link.exe
+# They are inserted into PATH by GitHub Actions.
+# -------------------------------
 
-# AMD64 specific compiler flags
-if(MSVC)
-    # MSVC specific flags for AMD64
-    set(CMAKE_C_FLAGS_INIT "/DWIN32 /D_WINDOWS")
-    set(CMAKE_CXX_FLAGS_INIT "/DWIN32 /D_WINDOWS")
+set(CMAKE_C_COMPILER clang)
+set(CMAKE_CXX_COMPILER clang++)
+set(CMAKE_RC_COMPILER llvm-rc)
+set(CMAKE_AR llvm-ar)
+set(CMAKE_LINKER lld-link)
 
-    # Optimization flags
-    set(CMAKE_C_FLAGS_RELEASE_INIT "/O2 /DNDEBUG")
-    set(CMAKE_CXX_FLAGS_RELEASE_INIT "/O2 /DNDEBUG")
-    set(CMAKE_C_FLAGS_DEBUG_INIT "/Od /Zi")
-    set(CMAKE_CXX_FLAGS_DEBUG_INIT "/Od /Zi")
-else()
-    # GCC/MinGW specific flags
-    set(CMAKE_C_FLAGS_INIT "-m64 -march=x86-64")
-    set(CMAKE_CXX_FLAGS_INIT "-m64 -march=x86-64")
+# Explicit MinGW target (very important)
+set(CMAKE_C_COMPILER_TARGET x86_64-w64-mingw32)
+set(CMAKE_CXX_COMPILER_TARGET x86_64-w64-mingw32)
 
-    # Static linking for standalone binary
-    set(CMAKE_EXE_LINKER_FLAGS_INIT "-static-libgcc -static-libstdc++")
-    set(CMAKE_SHARED_LINKER_FLAGS_INIT "-static-libgcc -static-libstdc++")
+# Force MSVC-style linker mode for Windows
+set(CMAKE_EXE_LINKER_FLAGS "/machine:x64")
+set(CMAKE_SHARED_LINKER_FLAGS "/machine:x64")
 
-    # Optimization flags
-    set(CMAKE_C_FLAGS_RELEASE_INIT "-O3 -DNDEBUG -march=x86-64 -mtune=generic")
-    set(CMAKE_CXX_FLAGS_RELEASE_INIT "-O3 -DNDEBUG -march=x86-64 -mtune=generic")
-    set(CMAKE_C_FLAGS_DEBUG_INIT "-g -O0")
-    set(CMAKE_CXX_FLAGS_DEBUG_INIT "-g -O0")
-endif()
+# Optimization flags
+set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG -march=x86-64 -mtune=generic")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=x86-64 -mtune=generic")
 
-# Windows-specific definitions
+set(CMAKE_C_FLAGS_DEBUG "-g -O0")
+set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
+
+# Windows definitions
 add_definitions(-DWIN32 -D_WIN32 -DWINDOWS)
 add_definitions(-DUNICODE -D_UNICODE)
 
-# Define minimum supported Windows version (Windows 7) for better compatibility
-# This prevents linking against newer APIs like clock_gettime64 that don't exist on older Windows
+# Minimum supported Windows: Win7 (0x0601)
+# LLVM-MinGW does NOT introduce APIs like clock_gettime64
 add_definitions(-D_WIN32_WINNT=0x0601 -DWINVER=0x0601)
 
 message(STATUS "====================================")
-message(STATUS "Native Windows AMD64 toolchain:")
+message(STATUS "LLVM-MinGW Windows AMD64 toolchain:")
 message(STATUS "  System: Windows")
 message(STATUS "  Processor: AMD64 (x86-64)")
-message(STATUS "  Target Windows: 7+ (0x0601)")
+message(STATUS "  Compiler: LLVM/Clang (llvm-mingw)")
+message(STATUS "  Target: x86_64-w64-mingw32")
+message(STATUS "  Linker: lld-link")
+message(STATUS "  Resource compiler: llvm-rc")
+message(STATUS "  Windows version: 7+ (0x0601)")
 message(STATUS "  Output suffix: ${CANGJIE_OUTPUT_SUFFIX}")
-if(MSVC)
-    message(STATUS "  Compiler: MSVC")
-else()
-    message(STATUS "  Compiler: GCC/MinGW")
-endif()
 message(STATUS "====================================")
