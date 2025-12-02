@@ -1826,7 +1826,7 @@ if (launch_info.disable_aslr()) {
             }
 
             // 限制最大写入大小以防止内存问题
-            const size_t MAX_WRITE_SIZE = 1024 * 1024; // 1MB
+            constexpr size_t MAX_WRITE_SIZE = 1024 * 1024; // 1MB
             if (data.size() > MAX_WRITE_SIZE) {
                 LOG_ERROR(
                     "Requested write size too large: " + std::to_string(data.size()) + " > " + std::to_string(
@@ -1963,7 +1963,7 @@ if (launch_info.disable_aslr()) {
             }
 
             // 限制反汇编范围以防止性能问题
-            const uint64_t MAX_DISASSEMBLE_SIZE = 64 * 1024; // 64KB
+            constexpr uint64_t MAX_DISASSEMBLE_SIZE = 64 * 1024; // 64KB
             if ((end_address - start_address) > MAX_DISASSEMBLE_SIZE) {
                 LOG_ERROR("Requested disassemble range too large: " +
                     std::to_string(end_address - start_address) + " > " + std::to_string(MAX_DISASSEMBLE_SIZE));
@@ -2327,12 +2327,10 @@ if (launch_info.disable_aslr()) {
         // 执行 LLDB 命令
         LOG_INFO("Executing LLDB command: " + req.command());
 
-        lldb::ReturnStatus return_status;
-
         // LLDB API 统一使用 HandleCommand 方法
         // 注意: async_execution 标志在这里不影响 HandleCommand 的行为
         // HandleCommand 本身是同步的，但命令内容可能触发异步操作（如 continue、run 等）
-        return_status = interpreter.HandleCommand(
+        lldb::ReturnStatus return_status = interpreter.HandleCommand(
             req.command().c_str(),
             result,
             true // add_to_history

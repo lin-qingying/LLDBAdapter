@@ -18,7 +18,6 @@
 #include <functional>
 #include <thread>
 #include <atomic>
-#include <chrono>
 #include <optional>
 #include <request.pb.h>
 
@@ -111,7 +110,7 @@ namespace Cangjie {
                                       const std::string &error_message = "",
                                       const std::optional<uint64_t> hash = std::nullopt) const;
 
-            lldbprotobuf::HashId CreateHashId(unsigned long long value) const;
+            static lldbprotobuf::HashId CreateHashId(unsigned long long value);
 
             bool SendReadMemoryResponse(bool success, uint64_t address, const std::string &data,
                                         const std::string &error_message = "",
@@ -272,55 +271,6 @@ namespace Cangjie {
             mutable lldb::SBProcess process_;
             mutable bool lldb_initialized_;
 
-#ifdef _WIN32
-            // Windows ConPTY support
-            struct ConPtyContext {
-                void* hpc;  // HPCON - pseudo console handle
-                void* hPipeIn;  // HANDLE - ConPTY input pipe (we write to this)
-                void* hPipeOut; // HANDLE - ConPTY output pipe (ConPTY writes to IDE named pipe)
-                void* hProcessStdout; // HANDLE - Process stdout pipe (process writes here)
-                void* hProcessStderr; // HANDLE - Process stderr pipe (process writes here)
-                std::string stdout_pipe_path; // Named pipe path for stdout redirection
-                std::string stderr_pipe_path; // Named pipe path for stderr redirection
-                std::thread bridge_thread; // Thread for bridging process output to ConPTY
-                std::atomic<bool> bridge_thread_running{false};
-
-                ConPtyContext() : hpc(nullptr), hPipeIn(nullptr), hPipeOut(nullptr),
-                                 hProcessStdout(nullptr), hProcessStderr(nullptr) {}
-            };
-            mutable std::unique_ptr<ConPtyContext> conpty_context_;
-
-            /**
-             * @brief Get the process stdout pipe path for LLDB redirection
-             */
-            std::string GetProcessStdoutPipePath() const;
-
-            /**
-             * @brief Get the process stderr pipe path for LLDB redirection
-             */
-            std::string GetProcessStderrPipePath() const;
-
-            /**
-             * @brief Create ConPTY for Windows pseudo terminal emulation
-             * @param stdin_path Path for stdin pipe (can be empty)
-             * @param stdout_path Path for stdout pipe (can be empty)
-             * @param stderr_path Path for stderr pipe (can be empty)
-             * @return true if ConPTY was created successfully
-             */
-            bool CreateConPty(const std::string& stdin_path,
-                            const std::string& stdout_path,
-                            const std::string& stderr_path);
-
-            /**
-             * @brief Cleanup ConPTY resources
-             */
-            void CleanupConPty();
-
-            /**
-             * @brief Thread function for bridging process output to ConPTY input
-             */
-            void ConPtyBridgeThread();
-#endif
 
             /**
              * @brief 初始化LLDB调试器（如果尚未初始化）
