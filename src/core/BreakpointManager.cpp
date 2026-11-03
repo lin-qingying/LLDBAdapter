@@ -537,7 +537,7 @@ BreakpointCreateResult BreakpointManager::CreateWatchpoint(
 }
 
 BreakpointCreateResult BreakpointManager::CreateWatchpointForValue(
-    const lldb::SBValue& value,
+    lldb::SBValue& value,
     int32_t thread_id,
     bool read_watch,
     bool write_watch) {

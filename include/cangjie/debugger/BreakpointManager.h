@@ -184,7 +184,7 @@ public:
      * 因此由调用方解析后传入，避免把数字 ID 当变量名查找
      */
     BreakpointCreateResult CreateWatchpointForValue(
-        const lldb::SBValue& value,
+        lldb::SBValue& value,
         int32_t thread_id = 0,
         bool read_watch = true,
         bool write_watch = true);

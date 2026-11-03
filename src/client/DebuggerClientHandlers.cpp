@@ -835,7 +835,7 @@ if (launch_info.disable_aslr()) {
 
         // 观察点：value_id 是变量映射里的 ID，不是变量名，
         // 必须先解析成 SBValue 再交给 BreakpointManager
-        BreakpointCreateResult create_result;
+        cangjie::debugger::BreakpointCreateResult create_result;
         if (req.has_watchpoint()) {
             const auto& watchpoint_req = req.watchpoint();
             lldb::SBValue value = FindVariableById(watchpoint_req.value_id().id());
