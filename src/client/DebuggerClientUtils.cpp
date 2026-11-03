@@ -62,19 +62,19 @@ namespace Cangjie::Debugger {
             return 0;
         }
 
-        // 获取变量的多个属性用于生成更唯一的哈希
+        // 获取变量的多个属性用于生成确定性哈希
         const char *variable_name = sb_value.GetName();
         const char *type_name = sb_value.GetTypeName();
         uint64_t address = sb_value.GetAddress().GetLoadAddress(target_);
         uint64_t byte_size = sb_value.GetByteSize();
-        auto current_time = std::chrono::high_resolution_clock::now();
-        auto time_stamp = current_time.time_since_epoch().count();
 
         // 组合多个变量属性生成哈希
         std::hash<std::string> str_hasher;
         std::hash<uint64_t> num_hasher;
 
-        // 组合变量名称、类型名称、地址、大小、线程ID、帧索引和时间戳
+        // 组合变量名称、类型名称、地址、大小、线程ID、帧索引。
+        // 不掺入时间戳：同一变量在同一位置每次请求必须得到相同 ID，
+        // 否则客户端先前持有的变量引用会在下一次请求时失效
         uint64_t name_hash = variable_name ? str_hasher(std::string(variable_name)) : 0;
         uint64_t type_hash = type_name ? str_hasher(std::string(type_name)) : 0;
         uint64_t combined = num_hasher(
@@ -82,7 +82,6 @@ namespace Cangjie::Debugger {
             (static_cast<uint64_t>(frame_index) << 32) ^
             address ^
             byte_size ^
-            time_stamp ^
             name_hash ^
             type_hash
         );
@@ -95,8 +94,11 @@ namespace Cangjie::Debugger {
             variable_id = 1;
         }
 
-        // 直接存储SBValue对象
-        variable_id_map_[variable_id] = sb_value;
+        // 直接存储SBValue对象（同一变量的重复分配会覆盖，ID 保持稳定）
+        auto [it, inserted] = variable_id_map_.try_emplace(variable_id, sb_value);
+        if (!inserted) {
+            it->second = sb_value;
+        }
 
         // 获取变量名称用于日志
         if (!variable_name) {
