@@ -75,7 +75,7 @@ namespace Cangjie::Debugger {
                                               const std::optional<uint64_t> hash) const {
         auto continue_resp = ProtoConverter::CreateContinueResponse(
             success,
-            error_message
+            error_message.c_str()
         );
 
         lldbprotobuf::Response response;
@@ -93,7 +93,7 @@ namespace Cangjie::Debugger {
                                              const std::optional<uint64_t> hash) const {
         auto suspend_resp = ProtoConverter::CreateSuspendResponse(
             success,
-            error_message
+            error_message.c_str()
         );
 
         lldbprotobuf::Response response;

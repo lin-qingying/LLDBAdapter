@@ -496,7 +496,7 @@ if (launch_info.disable_aslr()) {
         }
 
         // 事件由事件监听线程异步处理
-        return SendContinueResponse(hash);
+        return SendContinueResponse(true, "", hash);
     }
 
     bool DebuggerClient::HandleSuspendRequest(const std::optional<uint64_t> hash) const {
@@ -515,7 +515,7 @@ if (launch_info.disable_aslr()) {
         if (state == lldb::eStateStopped || state == lldb::eStateSuspended ||
             state == lldb::eStateExited || state == lldb::eStateCrashed) {
             LOG_INFO("Process already stopped/suspended/exited/crashed");
-            return SendSuspendResponse(hash);
+            return SendSuspendResponse(true, "", hash);
         }
 
         // 如果进程正在运行，使用 Stop() 请求暂停（避免向被调试进程注入 SIGSTOP）
@@ -528,7 +528,7 @@ if (launch_info.disable_aslr()) {
         }
 
         LOG_INFO("Process stop requested successfully");
-        return SendSuspendResponse(hash);
+        return SendSuspendResponse(true, "", hash);
     }
 
     bool DebuggerClient::HandleStepIntoRequest(const lldbprotobuf::StepIntoRequest &req,
