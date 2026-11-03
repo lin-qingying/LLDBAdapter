@@ -277,14 +277,11 @@ namespace Cangjie::Debugger {
                 return true;
             }
 
-            // 短暂等待避免忙等待
+            // 短暂等待避免忙等待。
+            // 注意：不要在这里消费事件——事件线程持有同一个 listener，
+            // 这里的 WaitForEvent 会把事件抢走，导致事件线程漏掉状态更新；
+            // 终止等待只需轮询进程状态即可
             std::this_thread::sleep_for(check_interval);
-
-            // 尝试轮询LLDB事件以更新状态
-            lldb::SBEvent event;
-            if (event_listener_.WaitForEvent(std::chrono::milliseconds(10).count(), event)) {
-                HandleEvent(event);
-            }
         }
     }
 
