@@ -139,18 +139,10 @@ BreakpointCreateResult BreakpointManager::HandleAddBreakpointRequest(
         }
 
         case BreakpointType::WATCH_BREAKPOINT: {
-            if (!request.has_watchpoint()) {
-                result.breakpoint_info.error_message = "Watchpoint request missing watchpoint information";
-                break;
-            }
-
-            const auto& watchpoint_bp = request.watchpoint();
-            result = CreateWatchpoint(
-                std::to_string(watchpoint_bp.value_id().id()),  // 使用 value_id 作为变量名
-                request.thread_id().id(),
-                watchpoint_bp.watch_read(),
-                watchpoint_bp.watch_write()
-            );
+            // 观察点必须由 DebuggerClient 先把 value_id 解析成 SBValue
+            // 再走 CreateWatchpointForValue，此处不应到达
+            result.breakpoint_info.error_message =
+                "Watchpoint requires value_id resolution (use CreateWatchpointForValue)";
             break;
         }
 
@@ -540,6 +532,46 @@ BreakpointCreateResult BreakpointManager::CreateWatchpoint(
 
     LOG_INFO("Created watchpoint for variable " + variable_name +
              " (ID: " + std::to_string(result.breakpoint_info.lldb_id) + ")");
+
+    return result;
+}
+
+BreakpointCreateResult BreakpointManager::CreateWatchpointForValue(
+    const lldb::SBValue& value,
+    int32_t thread_id,
+    bool read_watch,
+    bool write_watch) {
+
+    BreakpointCreateResult result;
+    result.breakpoint_info.type = BreakpointType::WATCH_BREAKPOINT;
+    result.breakpoint_info.thread_id = thread_id;
+
+    if (!target_.IsValid()) {
+        result.breakpoint_info.error_message = "No valid target for watchpoint creation";
+        return result;
+    }
+
+    if (!value.IsValid()) {
+        result.breakpoint_info.error_message = "Invalid value for watchpoint creation";
+        return result;
+    }
+
+    lldb::SBError error;
+    lldb::SBWatchpoint watchpoint = value.Watch(true, read_watch, write_watch, error);
+
+    if (!watchpoint.IsValid() || error.Fail()) {
+        result.breakpoint_info.error_message = "Failed to create watchpoint: " +
+            std::string(error.GetCString() ? error.GetCString() : "Unknown error");
+        return result;
+    }
+
+    result.breakpoint_info.lldb_id = watchpoint.GetID();
+    result.breakpoint_info.resolved = true;
+    result.success = true;
+
+    const char* value_name = value.GetName();
+    LOG_INFO("Created watchpoint for value '" + std::string(value_name ? value_name : "<unnamed>") +
+             "' (ID: " + std::to_string(result.breakpoint_info.lldb_id) + ")");
 
     return result;
 }
