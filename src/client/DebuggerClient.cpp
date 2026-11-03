@@ -227,8 +227,6 @@ namespace Cangjie::Debugger {
                 continue;
             }
 
-            LOG_INFO("Received CompositeRequest");
-
             // 如果提供了请求处理器，调用它；否则使用默认的HandleRequest方法
             if (request_handler) {
                 if (!request_handler(request)) {

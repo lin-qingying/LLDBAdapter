@@ -402,7 +402,6 @@ namespace Cangjie::Debugger {
         size_t num_bytes;
         while ((num_bytes = process_.GetSTDOUT(buffer, sizeof(buffer))) > 0) {
             std::string output_text(buffer, num_bytes);
-            LOG_INFO("[STDOUT] " + output_text);
             SendProcessOutputEvent(output_text, lldbprotobuf::OutputTypeStdout);
         }
     }
@@ -412,7 +411,6 @@ namespace Cangjie::Debugger {
         size_t num_bytes;
         while ((num_bytes = process_.GetSTDERR(buffer, sizeof(buffer))) > 0) {
             std::string error_text(buffer, num_bytes);
-            LOG_ERROR("[STDERR] " + error_text);
             SendProcessOutputEvent(error_text, lldbprotobuf::OutputTypeStderr);
         }
     }

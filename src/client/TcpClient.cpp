@@ -224,8 +224,6 @@ bool TcpClient::SendProtoMessage(const lldbprotobuf::Response& response) const {
         LOG_ERROR("Failed to send protobuf message");
         return false;
     }
-
-    LOG_INFO("Sent protobuf message of size: " + std::to_string(message_size) + " bytes");
     return true;
 }
 
@@ -271,8 +269,6 @@ bool TcpClient::SendEventBroadcast(const lldbprotobuf::Event& event) const {
         LOG_ERROR("Failed to send broadcast message");
         return false;
     }
-
-    LOG_INFO("Sent broadcast message of size: " + std::to_string(message_size) + " bytes");
     return true;
 }
 
@@ -351,8 +347,6 @@ bool TcpClient::ReceiveProtoMessage(lldbprotobuf::Request& request) const {
         return false;
     }
 
-
-    LOG_INFO("Received protobuf message of size: " + std::to_string(message_size) + " bytes");
     return true;
 }
 

@@ -27,6 +27,9 @@
  *
  * This file declares the Logger class that provides logging functionality
  * for the Cangjie debugger.
+ *
+ * 日志采用异步模型：调用线程仅做级别过滤并入队，格式化与 I/O（console + 文件）
+ * 全部由后台写线程完成，避免持锁同步写阻塞调试事件循环。
  */
 
 #ifndef CANGJIE_DEBUGGER_LOGGER_H
@@ -49,6 +52,10 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <atomic>
+#include <thread>
+#include <condition_variable>
+#include <deque>
 
 namespace Cangjie {
 namespace Debugger {
@@ -65,7 +72,7 @@ enum class LogLevel {
 };
 
 /**
- * @brief Simple logger class for debugging
+ * @brief Simple asynchronous logger for debugging
  */
 class Logger {
 public:
@@ -80,7 +87,7 @@ public:
                           bool enable_timestamp = true);
 
     /**
-     * @brief Shutdown logger
+     * @brief Shutdown logger: flush pending messages and stop the writer thread
      */
     static void Shutdown();
 
@@ -90,35 +97,19 @@ public:
      */
     static void SetMinLevel(LogLevel level);
 
-    /**
-     * @brief Log a debug message
-     * @param message Message to log
-     */
+    // std::string 重载（保留既有调用方式）
     static void Debug(const std::string& message);
-
-    /**
-     * @brief Log an info message
-     * @param message Message to log
-     */
     static void Info(const std::string& message);
-
-    /**
-     * @brief Log a warning message
-     * @param message Message to log
-     */
     static void Warning(const std::string& message);
-
-    /**
-     * @brief Log an error message
-     * @param message Message to log
-     */
     static void Error(const std::string& message);
-
-    /**
-     * @brief Log a critical message
-     * @param message Message to log
-     */
     static void Critical(const std::string& message);
+
+    // const char* 重载：字面量日志不再经过临时 std::string 构造即被拒绝
+    static void Debug(const char* message);
+    static void Info(const char* message);
+    static void Warning(const char* message);
+    static void Error(const char* message);
+    static void Critical(const char* message);
 
     /**
      * @brief Log a message with specific level
@@ -128,24 +119,33 @@ public:
     static void Log(LogLevel level, const std::string& message);
 
     /**
-     * @brief Check if a log level is enabled
+     * @brief Check if a log level is enabled (lock-free, atomic)
      * @param level Log level to check
      * @return true if enabled
      */
     static bool IsEnabled(LogLevel level);
 
 private:
-    static void WriteLog(LogLevel level, const std::string& message);
+    static void WriteLog(LogLevel level, std::string&& message);
+    static void Enqueue(LogLevel level, std::string&& message);
+    static void WriterLoop();
     static std::string GetLevelString(LogLevel level);
     static std::string GetTimestamp();
     static std::string FormatMessage(LogLevel level, const std::string& message);
 
 private:
     static std::unique_ptr<std::ofstream> s_log_file;
-    static LogLevel s_min_level;
+    static std::atomic<LogLevel> s_min_level;
     static bool s_enable_timestamp;
-    static std::mutex s_mutex;
-    static bool s_initialized;
+    static std::mutex s_mutex;          // 保护文件与队列元操作（Initialize/Shutdown）
+    static std::atomic<bool> s_initialized;
+
+    // 异步写线程与消息队列（队列受 s_queue_mutex 保护）
+    static std::thread s_writer_thread;
+    static std::mutex s_queue_mutex;
+    static std::condition_variable s_queue_cv;
+    static std::deque<std::pair<LogLevel, std::string>> s_queue;
+    static bool s_shutdown_requested;
 };
 
 // Convenience macros for logging
