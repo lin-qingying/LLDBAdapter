@@ -564,17 +564,17 @@ if (launch_info.disable_aslr()) {
         process_.SetSelectedThread(target_thread);
 
         // 执行单步进入 (step into)
-        try {
-            target_thread.StepInto(lldb::eOnlyDuringStepping);
-            LOG_INFO("StepInto initiated successfully for thread " + std::to_string(req.thread_id().id()));
-            return SendStepIntoResponse(true, "", hash);
-        } catch (const std::exception &e) {
-            LOG_ERROR("StepInto failed for thread " + std::to_string(req.thread_id().id()) + ": " + e.what());
-            return SendStepIntoResponse(false, "Step into failed: " + std::string(e.what()), hash);
-        } catch (...) {
-            LOG_ERROR("StepInto failed with unknown error for thread " + std::to_string(req.thread_id().id()));
-            return SendStepIntoResponse(false, "Step into operation failed", hash);
+        lldb::SBError error;
+        target_thread.StepInto(lldb::eOnlyDuringStepping, error);
+
+        if (error.Fail()) {
+            std::string error_msg = error.GetCString() ? error.GetCString() : "Unknown error";
+            LOG_ERROR("Failed to step into thread " + std::to_string(req.thread_id().id()) + ": " + error_msg);
+            return SendStepIntoResponse(false, "Step into failed: " + error_msg, hash);
         }
+
+        LOG_INFO("StepInto initiated successfully for thread " + std::to_string(req.thread_id().id()));
+        return SendStepIntoResponse(true, "", hash);
     }
 
     bool DebuggerClient::HandleStepOverRequest(const lldbprotobuf::StepOverRequest &req,
@@ -664,17 +664,17 @@ if (launch_info.disable_aslr()) {
         process_.SetSelectedThread(target_thread);
 
         // 执行单步跳出 (step out)
-        try {
-            target_thread.StepOut();
-            LOG_INFO("StepOut initiated successfully for thread " + std::to_string(req.thread_id().id()));
-            return SendStepOutResponse(true, "", hash);
-        } catch (const std::exception &e) {
-            LOG_ERROR("StepOut failed for thread " + std::to_string(req.thread_id().id()) + ": " + e.what());
-            return SendStepOutResponse(false, "Step out failed: " + std::string(e.what()), hash);
-        } catch (...) {
-            LOG_ERROR("StepOut failed with unknown error for thread " + std::to_string(req.thread_id().id()));
-            return SendStepOutResponse(false, "Step out operation failed", hash);
+        lldb::SBError error;
+        target_thread.StepOut(error);
+
+        if (error.Fail()) {
+            std::string error_msg = error.GetCString() ? error.GetCString() : "Unknown error";
+            LOG_ERROR("Failed to step out thread " + std::to_string(req.thread_id().id()) + ": " + error_msg);
+            return SendStepOutResponse(false, "Step out failed: " + error_msg, hash);
         }
+
+        LOG_INFO("StepOut initiated successfully for thread " + std::to_string(req.thread_id().id()));
+        return SendStepOutResponse(true, "", hash);
     }
 
     bool DebuggerClient::HandleRunToCursorRequest(const lldbprotobuf::RunToCursorRequest &req,
