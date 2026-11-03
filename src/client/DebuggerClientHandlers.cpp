@@ -564,17 +564,17 @@ if (launch_info.disable_aslr()) {
         process_.SetSelectedThread(target_thread);
 
         // 执行单步进入 (step into)
-        try {
-            target_thread.StepInto(lldb::eOnlyDuringStepping);
-            LOG_INFO("StepInto initiated successfully for thread " + std::to_string(req.thread_id().id()));
-            return SendStepIntoResponse(true, "", hash);
-        } catch (const std::exception &e) {
-            LOG_ERROR("StepInto failed for thread " + std::to_string(req.thread_id().id()) + ": " + e.what());
-            return SendStepIntoResponse(false, "Step into failed: " + std::string(e.what()), hash);
-        } catch (...) {
-            LOG_ERROR("StepInto failed with unknown error for thread " + std::to_string(req.thread_id().id()));
-            return SendStepIntoResponse(false, "Step into operation failed", hash);
+        // 注：本版本 LLDB 的 SBThread::StepInto 没有 SBError 重载，
+        // 通过校验进程处于停止状态来提前拦截无效的单步请求
+        if (process_.GetState() != lldb::eStateStopped) {
+            LOG_ERROR("Cannot step into: process is not stopped");
+            return SendStepIntoResponse(false, "Step into failed: process is not stopped", hash);
         }
+
+        target_thread.StepInto(lldb::eOnlyDuringStepping);
+
+        LOG_INFO("StepInto initiated successfully for thread " + std::to_string(req.thread_id().id()));
+        return SendStepIntoResponse(true, "", hash);
     }
 
     bool DebuggerClient::HandleStepOverRequest(const lldbprotobuf::StepOverRequest &req,
@@ -664,17 +664,17 @@ if (launch_info.disable_aslr()) {
         process_.SetSelectedThread(target_thread);
 
         // 执行单步跳出 (step out)
-        try {
-            target_thread.StepOut();
-            LOG_INFO("StepOut initiated successfully for thread " + std::to_string(req.thread_id().id()));
-            return SendStepOutResponse(true, "", hash);
-        } catch (const std::exception &e) {
-            LOG_ERROR("StepOut failed for thread " + std::to_string(req.thread_id().id()) + ": " + e.what());
-            return SendStepOutResponse(false, "Step out failed: " + std::string(e.what()), hash);
-        } catch (...) {
-            LOG_ERROR("StepOut failed with unknown error for thread " + std::to_string(req.thread_id().id()));
-            return SendStepOutResponse(false, "Step out operation failed", hash);
+        // 注：本版本 LLDB 的 SBThread::StepOut 没有 SBError 重载，
+        // 通过校验进程处于停止状态来提前拦截无效的单步请求
+        if (process_.GetState() != lldb::eStateStopped) {
+            LOG_ERROR("Cannot step out: process is not stopped");
+            return SendStepOutResponse(false, "Step out failed: process is not stopped", hash);
         }
+
+        target_thread.StepOut();
+
+        LOG_INFO("StepOut initiated successfully for thread " + std::to_string(req.thread_id().id()));
+        return SendStepOutResponse(true, "", hash);
     }
 
     bool DebuggerClient::HandleRunToCursorRequest(const lldbprotobuf::RunToCursorRequest &req,
