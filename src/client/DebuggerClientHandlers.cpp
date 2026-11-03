@@ -483,15 +483,16 @@ if (launch_info.disable_aslr()) {
         // 验证进程是否有效
         if (!process_.IsValid()) {
             LOG_ERROR("No valid process to continue");
-            return SendContinueResponse(hash);
+            return SendContinueResponse(false, "No valid process to continue", hash);
         }
 
 
         // 继续执行进程
         lldb::SBError error = process_.Continue();
         if (error.Fail()) {
-            LOG_ERROR("Failed to continue process: " + std::string(error.GetCString()));
-            return SendContinueResponse(hash);
+            std::string error_msg = error.GetCString() ? error.GetCString() : "Unknown error";
+            LOG_ERROR("Failed to continue process: " + error_msg);
+            return SendContinueResponse(false, "Failed to continue process: " + error_msg, hash);
         }
 
         // 事件由事件监听线程异步处理
@@ -504,7 +505,7 @@ if (launch_info.disable_aslr()) {
         // 验证进程是否有效
         if (!process_.IsValid()) {
             LOG_ERROR("No valid process to suspend");
-            return SendSuspendResponse(hash);
+            return SendSuspendResponse(false, "No valid process to suspend", hash);
         }
 
         lldb::StateType state = process_.GetState();
@@ -517,26 +518,16 @@ if (launch_info.disable_aslr()) {
             return SendSuspendResponse(hash);
         }
 
-        // 如果进程正在运行，暂停它
-        // 使用 Signal() 发送 SIGSTOP (Unix) 或等效的暂停信号
-        // 在Windows上，SIGSTOP可能不可用，我们使用信号值19（SIGSTOP的Unix值）
-        lldb::SBError error = process_.Signal(19); // SIGSTOP signal number
+        // 如果进程正在运行，使用 Stop() 请求暂停（避免向被调试进程注入 SIGSTOP）
+        lldb::SBError error = process_.Stop();
 
         if (error.Fail()) {
             std::string error_msg = error.GetCString() ? error.GetCString() : "Unknown error during process suspend";
             LOG_ERROR("Failed to suspend process: " + error_msg);
-            // 即使信号发送失败，也尝试使用 Stop() 方法
-            error = process_.Stop();
-            if (error.Fail()) {
-                LOG_ERROR("Failed to stop process with Stop() method: " +
-                    std::string(error.GetCString() ? error.GetCString() : ""));
-            } else {
-                LOG_INFO("Process stopped successfully using Stop() method");
-            }
-        } else {
-            LOG_INFO("Process suspend signal sent successfully");
+            return SendSuspendResponse(false, "Failed to suspend process: " + error_msg, hash);
         }
 
+        LOG_INFO("Process stop requested successfully");
         return SendSuspendResponse(hash);
     }
 
@@ -794,11 +785,12 @@ if (launch_info.disable_aslr()) {
             // 继续执行进程
             lldb::SBError error = process_.Continue();
             if (error.Fail()) {
-                LOG_ERROR("Failed to continue process: " + std::string(error.GetCString()));
+                std::string error_msg = error.GetCString() ? error.GetCString() : "Unknown error";
+                LOG_ERROR("Failed to continue process: " + error_msg);
                 // 清理临时断点
                 target_.BreakpointDelete(breakpoint_id);
                 return SendRunToCursorResponse(false, 0, "",
-                                               "Failed to continue process: " + std::string(error.GetCString()), hash);
+                                               "Failed to continue process: " + error_msg, hash);
             }
 
             LOG_INFO("RunToCursor with temporary breakpoint initiated successfully");
@@ -1728,13 +1720,16 @@ if (launch_info.disable_aslr()) {
             }
 
             // 执行表达式求值
-            lldb::SBError error;
             lldb::SBValue result = target_frame.EvaluateExpression(req.expression().c_str(), options);
-            uint64_t variable_id = AllocateVariableId(
-                target_thread.GetThreadID(),
-                target_frame.GetFrameID(),
-                result);
-            lldbprotobuf::Variable variable = ProtoConverter::CreateVariable(result, variable_id);
+
+            if (!result.IsValid()) {
+                LOG_ERROR("Expression evaluation returned invalid result");
+                lldbprotobuf::Variable empty_value;
+                return SendEvaluateResponse(false, empty_value, "Expression evaluation returned invalid result", hash);
+            }
+
+            // 求值错误需从返回的 SBValue 获取，而非独立的 SBError 对象
+            lldb::SBError error = result.GetError();
             if (error.Fail()) {
                 std::string error_msg = error.GetCString() ? error.GetCString() : "Expression evaluation failed";
                 LOG_ERROR("Expression evaluation failed: " + error_msg);
@@ -1742,11 +1737,11 @@ if (launch_info.disable_aslr()) {
                 return SendEvaluateResponse(false, empty_value, "Expression evaluation failed: " + error_msg, hash);
             }
 
-            if (!result.IsValid()) {
-                LOG_ERROR("Expression evaluation returned invalid result");
-                lldbprotobuf::Variable empty_value;
-                return SendEvaluateResponse(false, empty_value, "Expression evaluation returned invalid result", hash);
-            }
+            uint64_t variable_id = AllocateVariableId(
+                target_thread.GetThreadID(),
+                target_frame.GetFrameID(),
+                result);
+            lldbprotobuf::Variable variable = ProtoConverter::CreateVariable(result, variable_id);
 
 
             LOG_INFO("Expression evaluated successfully: '" + req.expression() + "' = " +
@@ -1935,7 +1930,9 @@ if (launch_info.disable_aslr()) {
 
                     // 估算地址范围（粗略估算）
                     constexpr uint32_t AVG_INSTRUCTION_SIZE = 8;
-                    start_address = anchor_address - (backward_count * AVG_INSTRUCTION_SIZE);
+                    const uint64_t backward_bytes = static_cast<uint64_t>(backward_count) * AVG_INSTRUCTION_SIZE;
+                    // 防止无符号下溢：锚点地址较小时直接从 0 开始
+                    start_address = (anchor_address > backward_bytes) ? (anchor_address - backward_bytes) : 0;
                     end_address = anchor_address + (forward_count * AVG_INSTRUCTION_SIZE);
                     count = backward_count + forward_count + 1; // +1 for anchor instruction
                     mode_type = "anchor";
@@ -1988,25 +1985,21 @@ if (launch_info.disable_aslr()) {
                 return SendDisassembleResponse(false, {}, 0, false, 0, "Requested disassemble range too large", hash);
             }
 
-            // 计算要读取的内存大小
-            uint64_t read_size = end_address - start_address;
-            std::vector<uint8_t> memory_buffer(read_size);
+            // 计算地址范围大小（仅用于指令条数估算，实际内存读取由 ReadInstructions 完成）
+            const uint64_t read_size = end_address - start_address;
 
-            // 读取指定地址范围的内存
-            lldb::SBError error;
-            size_t bytes_read = process_.ReadMemory(start_address, memory_buffer.data(), read_size, error);
-
-            if (error.Fail() || bytes_read == 0) {
-                LOG_ERROR("Failed to read memory for disassembly at address 0x" +
-                    std::to_string(start_address) + ": " +
-                    (error.GetCString() ? error.GetCString() : "Unknown error"));
-                return SendDisassembleResponse(false, {}, 0, false, 0, "Failed to read memory for disassembly", hash);
+            // 使用LLDB进行反汇编 - ReadInstructions 会自行从目标内存读取，
+            // 其第二个参数是要反汇编的指令数量上限。
+            // count 为 0 时（range/until_pivot 模式），用地址范围做粗略上限估算。
+            uint32_t instruction_limit = count;
+            if (instruction_limit == 0) {
+                constexpr uint32_t MIN_AVG_INSTRUCTION_SIZE = 1;
+                instruction_limit = static_cast<uint32_t>(read_size / MIN_AVG_INSTRUCTION_SIZE);
             }
 
-            // 使用LLDB进行反汇编 - 使用ReadInstructions方法从内存反汇编
             lldb::SBInstructionList instruction_list = target_.ReadInstructions(
                 lldb::SBAddress(start_address, target_),
-                static_cast<uint32_t>(bytes_read));
+                instruction_limit);
 
             if (!instruction_list.IsValid()) {
                 LOG_ERROR("Failed to get instruction list for address range 0x" +

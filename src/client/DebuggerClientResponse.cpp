@@ -71,10 +71,11 @@ namespace Cangjie::Debugger {
         return tcp_client_.SendProtoMessage(response);
     }
 
-    bool DebuggerClient::SendContinueResponse(const std::optional<uint64_t> hash) const {
+    bool DebuggerClient::SendContinueResponse(bool success, const std::string &error_message,
+                                              const std::optional<uint64_t> hash) const {
         auto continue_resp = ProtoConverter::CreateContinueResponse(
-            true, // success
-            "" // no error message
+            success,
+            error_message
         );
 
         lldbprotobuf::Response response;
@@ -88,10 +89,11 @@ namespace Cangjie::Debugger {
         return tcp_client_.SendProtoMessage(response);
     }
 
-    bool DebuggerClient::SendSuspendResponse(const std::optional<uint64_t> hash) const {
+    bool DebuggerClient::SendSuspendResponse(bool success, const std::string &error_message,
+                                             const std::optional<uint64_t> hash) const {
         auto suspend_resp = ProtoConverter::CreateSuspendResponse(
-            true, // success
-            "" // no error message
+            success,
+            error_message
         );
 
         lldbprotobuf::Response response;

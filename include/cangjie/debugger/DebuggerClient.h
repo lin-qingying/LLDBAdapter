@@ -73,9 +73,11 @@ namespace Cangjie {
                 const std::optional<uint64_t> hash = std::nullopt
             ) const;
 
-            bool SendContinueResponse(const std::optional<uint64_t> hash = std::nullopt) const;
+            bool SendContinueResponse(bool success = true, const std::string &error_message = "",
+                                      const std::optional<uint64_t> hash = std::nullopt) const;
 
-            bool SendSuspendResponse(const std::optional<uint64_t> hash = std::nullopt) const;
+            bool SendSuspendResponse(bool success = true, const std::string &error_message = "",
+                                     const std::optional<uint64_t> hash = std::nullopt) const;
 
             bool SendDetachResponse(bool success = true, const std::string &error_message = "",
                                     const std::optional<uint64_t> hash = std::nullopt) const;
