@@ -27,6 +27,7 @@
 
 
 #include <string>
+#include <mutex>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -63,6 +64,9 @@ public:
 private:
     SOCKET_TYPE socket_;
     bool connected_;
+    // 保护 socket 发送：事件线程（SendEventBroadcast）与请求主线程
+    // （SendProtoMessage）并发写同一 socket，写交错会破坏帧协议
+    mutable std::mutex io_mutex_;
 
 #ifdef _WIN32
     bool wsa_initialized_;
