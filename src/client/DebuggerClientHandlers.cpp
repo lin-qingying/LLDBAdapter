@@ -833,8 +833,27 @@ if (launch_info.disable_aslr()) {
                                              "No valid target available", hash);
         }
 
-        // 使用 BreakpointManager 处理断点请求
-        auto create_result = breakpoint_manager_->HandleAddBreakpointRequest(req);
+        // 观察点：value_id 是变量映射里的 ID，不是变量名，
+        // 必须先解析成 SBValue 再交给 BreakpointManager
+        cangjie::debugger::BreakpointCreateResult create_result;
+        if (req.has_watchpoint()) {
+            const auto& watchpoint_req = req.watchpoint();
+            lldb::SBValue value = FindVariableById(watchpoint_req.value_id().id());
+            if (!value.IsValid()) {
+                LOG_ERROR("Watchpoint value_id not found or invalid: " +
+                          std::to_string(watchpoint_req.value_id().id()));
+                lldbprotobuf::Breakpoint bp;
+                std::vector<lldbprotobuf::BreakpointLocation> locations;
+                return SendAddBreakpointResponse(false, BreakpointType::WATCH_BREAKPOINT, bp, locations,
+                                                 "Watchpoint value_id not found: " +
+                                                     std::to_string(watchpoint_req.value_id().id()), hash);
+            }
+            create_result = breakpoint_manager_->CreateWatchpointForValue(
+                value, req.thread_id().id(), watchpoint_req.watch_read(), watchpoint_req.watch_write());
+        } else {
+            // 使用 BreakpointManager 处理其他类型的断点请求
+            create_result = breakpoint_manager_->HandleAddBreakpointRequest(req);
+        }
 
         if (!create_result.success) {
             LOG_ERROR("Failed to create breakpoint: " + create_result.breakpoint_info.error_message);
