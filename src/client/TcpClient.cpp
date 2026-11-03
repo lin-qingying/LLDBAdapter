@@ -34,7 +34,7 @@
 #include <request.pb.h>
 #include <response.pb.h>
 #include <vector>
-#ifdef __linux__
+#ifndef _WIN32
 #include <netinet/tcp.h> // TCP_NODELAY
 #endif
 
