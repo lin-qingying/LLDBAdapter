@@ -191,15 +191,20 @@ namespace Cangjie {
                         if (target.IsValid()) {
                             lldb::SBWatchpoint wp = target.FindWatchpointByID(wp_id);
                             if (wp.IsValid()) {
-                               // 获取观察点类型
-                                uint32_t wp_type = wp.GetWatchSize();
-                                if (wp_type & 0x1) { // 写观察点
-                                    watchpoint_info->set_watch_type(lldbprotobuf::WATCH_TYPE_WRITE);
-                                } else if (wp_type & 0x2) { // 读观察点
-                                    watchpoint_info->set_watch_type(lldbprotobuf::WATCH_TYPE_READ);
-                                } else { // 读写观察点
+                               // 获取观察点类型：IsWatchingReads/Writes 是 LLDB 的
+                               // 真实读写标志，GetWatchSize() 返回的是字节数
+                                const bool watches_reads = wp.IsWatchingReads();
+                                const bool watches_writes = wp.IsWatchingWrites();
+                                if (watches_reads && watches_writes) {
                                     watchpoint_info->set_watch_type(lldbprotobuf::WATCH_TYPE_READ_WRITE);
-                                }                            }
+                                } else if (watches_writes) {
+                                    watchpoint_info->set_watch_type(lldbprotobuf::WATCH_TYPE_WRITE);
+                                } else if (watches_reads) {
+                                    watchpoint_info->set_watch_type(lldbprotobuf::WATCH_TYPE_READ);
+                                } else {
+                                    watchpoint_info->set_watch_type(lldbprotobuf::WATCH_TYPE_READ_WRITE);
+                                }
+                            }
                         }
                     }
 
@@ -292,33 +297,26 @@ namespace Cangjie {
                             }
                         }
 
-                        // 由于 GetPreviousPC() 不存在，我们根据单步数据来判断步进范围
-                        uint32_t step_data_count_for_range = sb_thread.GetStopReasonDataCount();
-                        if (step_data_count_for_range > 0) {
-                            // 如果有停止数据，认为是指令级单步
-                            step_info->set_step_range(lldbprotobuf::STEP_RANGE_INSTRUCTION);
-                        } else {
-                            // 否则认为是行级单步
-                            step_info->set_step_range(lldbprotobuf::STEP_RANGE_LINE);
-                        }
-                    }
+                        // eStopReasonTrace 的停止数据不含可靠的步进类型信息，
+                        // 用停止描述推断（LLDB 描述如 "step in"/"step-over"）
+                        const std::string desc_lower = [](std::string s) {
+                            for (char &c : s) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+                            return s;
+                        }(description);
 
-                    // 通过线程信息判断单步类型
-                    uint32_t step_data_count = sb_thread.GetStopReasonDataCount();
-                    if (step_data_count > 0) {
-                        uint64_t step_data = sb_thread.GetStopReasonDataAtIndex(0);
-                        // 根据停止数据判断步进类型
-                        if (step_data == 1) {
-                            step_info->set_step_type(lldbprotobuf::STEP_TYPE_INTO);
-                        } else if (step_data == 2) {
+                        if (desc_lower.find("over") != std::string::npos) {
                             step_info->set_step_type(lldbprotobuf::STEP_TYPE_OVER);
-                        } else if (step_data == 3) {
+                        } else if (desc_lower.find("out") != std::string::npos) {
                             step_info->set_step_type(lldbprotobuf::STEP_TYPE_OUT);
                         } else {
                             step_info->set_step_type(lldbprotobuf::STEP_TYPE_INTO);
                         }
-                    } else {
-                        step_info->set_step_type(lldbprotobuf::STEP_TYPE_INTO);
+
+                        if (desc_lower.find("instruction") != std::string::npos) {
+                            step_info->set_step_range(lldbprotobuf::STEP_RANGE_INSTRUCTION);
+                        } else {
+                            step_info->set_step_range(lldbprotobuf::STEP_RANGE_LINE);
+                        }
                     }
 
                     break;
@@ -1466,10 +1464,12 @@ namespace Cangjie {
                 // 设置无符号整数值（如果可以解析的话）
                 try {
                     std::string value_str = value;
+                    // 十六进制（0x/0X 前缀）按 16 进制解析，
+                    // 其余（LLDB 也可能返回十进制形式）按 10 进制解析
                     if (value_str.find("0x") == 0 || value_str.find("0X") == 0) {
-                        // 尝试解析十六进制值
-                        uint64_t unsigned_val = std::stoull(value_str, nullptr, 16);
-                        reg.set_value_unsigned(unsigned_val);
+                        reg.set_value_unsigned(std::stoull(value_str, nullptr, 16));
+                    } else {
+                        reg.set_value_unsigned(std::stoull(value_str, nullptr, 10));
                     }
                 } catch (...) {
                     // 如果解析失败，设置默认值0
@@ -1524,39 +1524,28 @@ namespace Cangjie {
             }
 
             // 获取寄存器集合名称
-            // 寄存器集合通常通过寄存器名称的前缀来判断
-            std::string reg_name = reg.name();
-            if (reg_name.find("rax") != std::string::npos ||
-                reg_name.find("rbx") != std::string::npos ||
-                reg_name.find("rcx") != std::string::npos ||
-                reg_name.find("rdx") != std::string::npos ||
-                reg_name.find("rsi") != std::string::npos ||
-                reg_name.find("rdi") != std::string::npos ||
-                reg_name.find("rbp") != std::string::npos ||
-                reg_name.find("rsp") != std::string::npos ||
-                reg_name.find("r8") != std::string::npos ||
-                reg_name.find("r9") != std::string::npos ||
-                reg_name.find("r10") != std::string::npos ||
-                reg_name.find("r11") != std::string::npos ||
-                reg_name.find("r12") != std::string::npos ||
-                reg_name.find("r13") != std::string::npos ||
-                reg_name.find("r14") != std::string::npos ||
-                reg_name.find("r15") != std::string::npos) {
+            // 用精确名称/前缀匹配，避免子串误判（如 "cs" 会命中 "mxcsr"）
+            const std::string reg_name = reg.name();
+            const auto is_one_of = [&reg_name](std::initializer_list<const char*> names) {
+                for (const char* n : names) {
+                    if (reg_name == n) return true;
+                }
+                return false;
+            };
+            if (is_one_of({"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp"}) ||
+                (reg_name.size() <= 3 && reg_name[0] == 'r' && reg_name.size() > 1 &&
+                 isdigit(static_cast<unsigned char>(reg_name[1])))) {
+                // r8-r15 及 x86_64 通用寄存器
                 reg.set_group_name("general");
-            } else if (reg_name.find("xmm") != std::string::npos ||
-                      reg_name.find("ymm") != std::string::npos ||
-                      reg_name.find("zmm") != std::string::npos) {
+            } else if (reg_name.rfind("xmm", 0) == 0 ||
+                       reg_name.rfind("ymm", 0) == 0 ||
+                       reg_name.rfind("zmm", 0) == 0) {
                 reg.set_group_name("floating_point");
-            } else if (reg_name.find("cs") != std::string::npos ||
-                      reg_name.find("ds") != std::string::npos ||
-                      reg_name.find("es") != std::string::npos ||
-                      reg_name.find("fs") != std::string::npos ||
-                      reg_name.find("gs") != std::string::npos ||
-                      reg_name.find("ss") != std::string::npos) {
+            } else if (is_one_of({"cs", "ds", "es", "fs", "gs", "ss", "rip", "rflags", "eflags"})) {
                 reg.set_group_name("special");
-            } else if (reg_name.find("st") != std::string::npos) {
+            } else if (reg_name.rfind("st", 0) == 0 && reg_name.size() <= 3) {
                 reg.set_group_name("floating_point");
-            } else if (reg_name.find("mm") != std::string::npos) {
+            } else if (reg_name.rfind("mm", 0) == 0) {
                 reg.set_group_name("vector");
             } else {
                 reg.set_group_name("general");
