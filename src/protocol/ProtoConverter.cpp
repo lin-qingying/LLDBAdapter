@@ -24,6 +24,8 @@
 
 #include "cangjie/debugger/ProtoConverter.h"
 
+#include "lldb/API/SBStream.h"
+
 
 
 namespace Cangjie {
