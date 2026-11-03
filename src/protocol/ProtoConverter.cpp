@@ -191,10 +191,17 @@ namespace Cangjie {
                         if (target.IsValid()) {
                             lldb::SBWatchpoint wp = target.FindWatchpointByID(wp_id);
                             if (wp.IsValid()) {
-                               // 获取观察点类型：IsWatchingReads/Writes 是 LLDB 的
-                               // 真实读写标志，GetWatchSize() 返回的是字节数
-                                const bool watches_reads = wp.IsWatchingReads();
-                                const bool watches_writes = wp.IsWatchingWrites();
+                               // GetWatchSize() 返回字节数而非读写标志；
+                               // 本版本 SBWatchpoint 无 IsWatchingReads/Writes，
+                               // 从描述文本解析（brief 描述含 "type = r"/"type = w"）
+                                lldb::SBStream wp_desc_stream;
+                                bool watches_reads = false;
+                                bool watches_writes = false;
+                                if (wp.GetDescription(wp_desc_stream, lldb::eDescriptionLevelBrief)) {
+                                    const std::string wp_desc = wp_desc_stream.GetData();
+                                    watches_reads = wp_desc.find("type = r") != std::string::npos;
+                                    watches_writes = wp_desc.find("type = w") != std::string::npos;
+                                }
                                 if (watches_reads && watches_writes) {
                                     watchpoint_info->set_watch_type(lldbprotobuf::WATCH_TYPE_READ_WRITE);
                                 } else if (watches_writes) {
