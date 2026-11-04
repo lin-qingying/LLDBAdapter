@@ -49,8 +49,58 @@ namespace Cangjie::Debugger {
         if (InitializeLLDB()) {
             bool success = false;
             lldb::SBError err;
-            target_ = debugger_.CreateTarget(req.file_path().c_str());
-            success = target_.IsValid();
+
+            // 远程调试：options 提供 "remote_connect"（connect://host:port）时，
+            // 先创建并连接 SBPlatform，再用带 platform 名的 CreateTarget 重载
+            const bool is_remote = req.options().contains("remote_connect");
+            std::string platform_name;
+            lldb::SBPlatform platform(nullptr);
+            if (is_remote) {
+                platform_name = req.options().contains("platform")
+                                    ? req.options().at("platform")
+                                    : "remote-linux";
+                LOG_INFO("Connecting remote platform '" + platform_name + "' via " +
+                         req.options().at("remote_connect"));
+                platform = lldb::SBPlatform(platform_name.c_str());
+                lldb::SBPlatformConnectOptions connect_options(req.options().at("remote_connect").c_str());
+                lldb::SBError connect_err = platform.ConnectRemote(connect_options);
+                if (connect_err.Fail()) {
+                    const char *msg = connect_err.GetCString();
+                    LOG_ERROR("Failed to connect remote platform: " +
+                              std::string(msg ? msg : "Unknown error"));
+                    return SendCreateTargetResponse(false, "Failed to connect remote platform: " +
+                        std::string(msg ? msg : "Unknown error"), hash);
+                }
+
+                // 可选：把本地可执行文件上传到远端（remote_upload 本地路径，remote_upload_dst 远端路径）
+                if (req.options().contains("remote_upload")) {
+                    const std::string &local_path = req.options().at("remote_upload");
+                    std::string remote_path = req.options().contains("remote_upload_dst")
+                                                  ? req.options().at("remote_upload_dst")
+                                                  : "/tmp/" + local_path.substr(local_path.find_last_of("/\\") + 1);
+                    LOG_INFO("Uploading binary to remote: " + remote_path);
+                    lldb::SBError upload_err = platform.PutFile(
+                        lldb::SBFileSpec(local_path.c_str()),
+                        lldb::SBFileSpec(remote_path.c_str()));
+                    if (upload_err.Fail()) {
+                        const char *msg = upload_err.GetCString();
+                        LOG_ERROR("Failed to upload binary: " + std::string(msg ? msg : "Unknown error"));
+                        return SendCreateTargetResponse(false, "Failed to upload binary: " +
+                            std::string(msg ? msg : "Unknown error"), hash);
+                    }
+                }
+
+                const std::string &triple = req.target_triple();
+                target_ = debugger_.CreateTarget(req.file_path().c_str(),
+                                                 triple.c_str(),
+                                                 platform.GetName(),
+                                                 false,
+                                                 err);
+                success = target_.IsValid();
+            } else {
+                target_ = debugger_.CreateTarget(req.file_path().c_str());
+                success = target_.IsValid();
+            }
             if (!success) {
                 LOG_ERROR("Failed to create target");
                 return SendCreateTargetResponse(false, "Failed to create target", hash);
