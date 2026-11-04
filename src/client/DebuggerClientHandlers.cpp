@@ -68,6 +68,27 @@ namespace Cangjie::Debugger {
                 );
                 LOG_INFO("Registered target event listeners immediately after target creation");
             }
+
+            // 核心转储分析：options 中提供 "core_dump" 路径时加载 core 文件，
+            // 加载后 target_.GetProcess() 即为转储进程，可直接做栈帧/变量/寄存器检查
+            if (target_.IsValid() && req.options().contains("core_dump")) {
+                const std::string &core_path = req.options().at("core_dump");
+                LOG_INFO("Loading core dump: " + core_path);
+                lldb::SBError core_err = target_.LoadCore(core_path.c_str());
+                if (core_err.Fail()) {
+                    const char *msg = core_err.GetCString();
+                    LOG_ERROR("Failed to load core dump: " + std::string(msg ? msg : "Unknown error"));
+                    return SendCreateTargetResponse(false, "Failed to load core dump: " +
+                        std::string(msg ? msg : "Unknown error"), hash);
+                }
+                process_ = target_.GetProcess();
+                if (!process_.IsValid()) {
+                    LOG_ERROR("Core dump loaded but process is invalid");
+                    return SendCreateTargetResponse(false, "Core dump loaded but process is invalid", hash);
+                }
+                LOG_INFO("Core dump loaded successfully (pid: " +
+                         std::to_string(process_.GetProcessID()) + ")");
+            }
         } else {
             return SendCreateTargetResponse(false, "LLDB not available", hash);
         }
