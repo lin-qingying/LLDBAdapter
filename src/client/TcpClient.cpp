@@ -34,6 +34,9 @@
 #include <request.pb.h>
 #include <response.pb.h>
 #include <vector>
+#ifndef _WIN32
+#include <netinet/tcp.h> // TCP_NODELAY
+#endif
 
 #ifdef _WIN32
 #include <ws2tcpip.h>
@@ -60,7 +63,21 @@ namespace {
 #else
             ssize_t received = recv(socket, buf + total_received, size - total_received, 0);
 #endif
-            if (received <= 0) {
+            if (received == 0) {
+                return false; // 对端关闭连接
+            }
+            if (received < 0) {
+                // 超时/中断不是致命错误，继续等待剩余数据
+#ifdef _WIN32
+                int err = WSAGetLastError();
+                if (err == WSAETIMEDOUT || err == WSAEWOULDBLOCK || err == WSAEINTR) {
+                    continue;
+                }
+#else
+                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                    continue;
+                }
+#endif
                 return false;
             }
             total_received += received;
@@ -156,6 +173,27 @@ bool TcpClient::Connect(const std::string& host, int port) {
     }
 
     connected_ = true;
+
+    // TCP_NODELAY：调试请求/响应都是小包，禁用 Nagle 降低交互延迟
+    int nodelay = 1;
+    setsockopt(socket_, IPPROTO_TCP, TCP_NODELAY,
+               reinterpret_cast<const char *>(&nodelay), sizeof(nodelay));
+
+    // 收发超时：对端无响应时不能永久阻塞线程
+#ifdef _WIN32
+    DWORD timeout_ms = 30000;
+    setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO,
+               reinterpret_cast<const char *>(&timeout_ms), sizeof(timeout_ms));
+    setsockopt(socket_, SOL_SOCKET, SO_SNDTIMEO,
+               reinterpret_cast<const char *>(&timeout_ms), sizeof(timeout_ms));
+#else
+    struct timeval timeout_tv = {};
+    timeout_tv.tv_sec = 30;
+    timeout_tv.tv_usec = 0;
+    setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, &timeout_tv, sizeof(timeout_tv));
+    setsockopt(socket_, SOL_SOCKET, SO_SNDTIMEO, &timeout_tv, sizeof(timeout_tv));
+#endif
+
     LOG_INFO("Successfully connected to " + host + ":" + std::to_string(port));
     return true;
 }
@@ -219,10 +257,13 @@ bool TcpClient::SendProtoMessage(const lldbprotobuf::Response& response) const {
     // 复制消息内容
     std::memcpy(packet.data() + 4, serialized.data(), message_size);
 
-    // 一次性发送完整数据包
-    if (!SendExact(socket_, packet.data(), packet.size())) {
-        LOG_ERROR("Failed to send protobuf message");
-        return false;
+    // 一次性发送完整数据包（持锁：事件线程与请求主线程并发写同一 socket）
+    {
+        std::lock_guard<std::mutex> io_lock(io_mutex_);
+        if (!SendExact(socket_, packet.data(), packet.size())) {
+            LOG_ERROR("Failed to send protobuf message");
+            return false;
+        }
     }
     return true;
 }
@@ -264,10 +305,13 @@ bool TcpClient::SendEventBroadcast(const lldbprotobuf::Event& event) const {
     // 复制消息内容
     std::memcpy(packet.data() + 4, serialized.data(), message_size);
 
-    // 一次性发送完整数据包
-    if (!SendExact(socket_, packet.data(), packet.size())) {
-        LOG_ERROR("Failed to send broadcast message");
-        return false;
+    // 一次性发送完整数据包（事件线程与主线程并发发送，需持锁防止帧交错）
+    {
+        std::lock_guard<std::mutex> io_lock(io_mutex_);
+        if (!SendExact(socket_, packet.data(), packet.size())) {
+            LOG_ERROR("Failed to send broadcast message");
+            return false;
+        }
     }
     return true;
 }
@@ -287,9 +331,22 @@ bool TcpClient::ReceiveData(char* buffer, size_t buffer_size, size_t& bytes_rece
     if (received <= 0) {
         if (received == 0) {
             LOG_INFO("Connection closed by server");
-        } else {
-            LOG_ERROR("Failed to receive data");
+            connected_ = false;
+            return false;
         }
+        // 超时/中断不是断连，返回失败但不置 connected_=false，
+        // 让上层在超时重试后自行判断连接是否仍然健康
+#ifdef _WIN32
+        int err = WSAGetLastError();
+        if (err == WSAETIMEDOUT || err == WSAEWOULDBLOCK || err == WSAEINTR) {
+            return false;
+        }
+#else
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+            return false;
+        }
+#endif
+        LOG_ERROR("Failed to receive data");
         connected_ = false;
         return false;
     }

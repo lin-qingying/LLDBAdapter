@@ -177,6 +177,18 @@ public:
         bool read_watch = true,
         bool write_watch = true);
 
+    /**
+     * @brief 基于已解析的 SBValue 创建观察点
+     *
+     * value_id → SBValue 的解析依赖 DebuggerClient 的变量映射，
+     * 因此由调用方解析后传入，避免把数字 ID 当变量名查找
+     */
+    BreakpointCreateResult CreateWatchpointForValue(
+        lldb::SBValue& value,
+        int32_t thread_id = 0,
+        bool read_watch = true,
+        bool write_watch = true);
+
     // ========================================================================
     // 断点操作方法
     // ========================================================================

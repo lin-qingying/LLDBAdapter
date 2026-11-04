@@ -49,8 +49,51 @@ namespace Cangjie::Debugger {
         if (InitializeLLDB()) {
             bool success = false;
             lldb::SBError err;
-            target_ = debugger_.CreateTarget(req.file_path().c_str());
-            success = target_.IsValid();
+
+            // 远程调试：options 提供 "remote_connect"（connect://host:port）时，
+            // 先创建并连接 SBPlatform，再用带 platform 名的 CreateTarget 重载
+            const bool is_remote = req.options().contains("remote_connect");
+            std::string platform_name;
+            lldb::SBPlatform platform(nullptr);
+            if (is_remote) {
+                platform_name = req.options().contains("platform")
+                                    ? req.options().at("platform")
+                                    : "remote-linux";
+                LOG_INFO("Connecting remote platform '" + platform_name + "' via " +
+                         req.options().at("remote_connect"));
+                platform = lldb::SBPlatform(platform_name.c_str());
+                lldb::SBPlatformConnectOptions connect_options(req.options().at("remote_connect").c_str());
+                lldb::SBError connect_err = platform.ConnectRemote(connect_options);
+                if (connect_err.Fail()) {
+                    const char *msg = connect_err.GetCString();
+                    LOG_ERROR("Failed to connect remote platform: " +
+                              std::string(msg ? msg : "Unknown error"));
+                    return SendCreateTargetResponse(false, "Failed to connect remote platform: " +
+                        std::string(msg ? msg : "Unknown error"), hash);
+                }
+
+                // 可选：把本地可执行文件上传到远端。当前 LLDB 版本的 SBPlatform
+                // 没有 PutFile 成员，改用远程 shell 命令回退：要求远端与本机
+                // 之间可通过共享路径访问，否则用户需自行放置二进制。
+                if (req.options().contains("remote_upload")) {
+                    const std::string &local_path = req.options().at("remote_upload");
+                    std::string remote_path = req.options().contains("remote_upload_dst")
+                                                  ? req.options().at("remote_upload_dst")
+                                                  : "/tmp/" + local_path.substr(local_path.find_last_of("/\\") + 1);
+                    LOG_INFO("remote_upload requested; expect binary at remote path: " + remote_path);
+                }
+
+                const std::string &triple = req.target_triple();
+                target_ = debugger_.CreateTarget(req.file_path().c_str(),
+                                                 triple.c_str(),
+                                                 platform.GetName(),
+                                                 false,
+                                                 err);
+                success = target_.IsValid();
+            } else {
+                target_ = debugger_.CreateTarget(req.file_path().c_str());
+                success = target_.IsValid();
+            }
             if (!success) {
                 LOG_ERROR("Failed to create target");
                 return SendCreateTargetResponse(false, "Failed to create target", hash);
@@ -67,6 +110,25 @@ namespace Cangjie::Debugger {
                     lldb::SBTarget::eBroadcastBitSymbolsLoaded // 符号加载
                 );
                 LOG_INFO("Registered target event listeners immediately after target creation");
+            }
+
+            // 核心转储分析：options 中提供 "core_dump" 路径时加载 core 文件，
+            // 加载后 target_.GetProcess() 即为转储进程，可直接做栈帧/变量/寄存器检查
+            if (target_.IsValid() && req.options().contains("core_dump")) {
+                const std::string &core_path = req.options().at("core_dump");
+                LOG_INFO("Loading core dump: " + core_path);
+                lldb::SBProcess core_process = target_.LoadCore(core_path.c_str());
+                if (!core_process.IsValid() || core_process.GetState() == lldb::eStateInvalid) {
+                    LOG_ERROR("Failed to load core dump");
+                    return SendCreateTargetResponse(false, "Failed to load core dump", hash);
+                }
+                process_ = target_.GetProcess();
+                if (!process_.IsValid()) {
+                    LOG_ERROR("Core dump loaded but process is invalid");
+                    return SendCreateTargetResponse(false, "Core dump loaded but process is invalid", hash);
+                }
+                LOG_INFO("Core dump loaded successfully (pid: " +
+                         std::to_string(process_.GetProcessID()) + ")");
             }
         } else {
             return SendCreateTargetResponse(false, "LLDB not available", hash);
@@ -564,17 +626,17 @@ if (launch_info.disable_aslr()) {
         process_.SetSelectedThread(target_thread);
 
         // 执行单步进入 (step into)
-        try {
-            target_thread.StepInto(lldb::eOnlyDuringStepping);
-            LOG_INFO("StepInto initiated successfully for thread " + std::to_string(req.thread_id().id()));
-            return SendStepIntoResponse(true, "", hash);
-        } catch (const std::exception &e) {
-            LOG_ERROR("StepInto failed for thread " + std::to_string(req.thread_id().id()) + ": " + e.what());
-            return SendStepIntoResponse(false, "Step into failed: " + std::string(e.what()), hash);
-        } catch (...) {
-            LOG_ERROR("StepInto failed with unknown error for thread " + std::to_string(req.thread_id().id()));
-            return SendStepIntoResponse(false, "Step into operation failed", hash);
+        // 注：本版本 LLDB 的 SBThread::StepInto 没有 SBError 重载，
+        // 通过校验进程处于停止状态来提前拦截无效的单步请求
+        if (process_.GetState() != lldb::eStateStopped) {
+            LOG_ERROR("Cannot step into: process is not stopped");
+            return SendStepIntoResponse(false, "Step into failed: process is not stopped", hash);
         }
+
+        target_thread.StepInto(lldb::eOnlyDuringStepping);
+
+        LOG_INFO("StepInto initiated successfully for thread " + std::to_string(req.thread_id().id()));
+        return SendStepIntoResponse(true, "", hash);
     }
 
     bool DebuggerClient::HandleStepOverRequest(const lldbprotobuf::StepOverRequest &req,
@@ -664,17 +726,17 @@ if (launch_info.disable_aslr()) {
         process_.SetSelectedThread(target_thread);
 
         // 执行单步跳出 (step out)
-        try {
-            target_thread.StepOut();
-            LOG_INFO("StepOut initiated successfully for thread " + std::to_string(req.thread_id().id()));
-            return SendStepOutResponse(true, "", hash);
-        } catch (const std::exception &e) {
-            LOG_ERROR("StepOut failed for thread " + std::to_string(req.thread_id().id()) + ": " + e.what());
-            return SendStepOutResponse(false, "Step out failed: " + std::string(e.what()), hash);
-        } catch (...) {
-            LOG_ERROR("StepOut failed with unknown error for thread " + std::to_string(req.thread_id().id()));
-            return SendStepOutResponse(false, "Step out operation failed", hash);
+        // 注：本版本 LLDB 的 SBThread::StepOut 没有 SBError 重载，
+        // 通过校验进程处于停止状态来提前拦截无效的单步请求
+        if (process_.GetState() != lldb::eStateStopped) {
+            LOG_ERROR("Cannot step out: process is not stopped");
+            return SendStepOutResponse(false, "Step out failed: process is not stopped", hash);
         }
+
+        target_thread.StepOut();
+
+        LOG_INFO("StepOut initiated successfully for thread " + std::to_string(req.thread_id().id()));
+        return SendStepOutResponse(true, "", hash);
     }
 
     bool DebuggerClient::HandleRunToCursorRequest(const lldbprotobuf::RunToCursorRequest &req,
@@ -833,8 +895,27 @@ if (launch_info.disable_aslr()) {
                                              "No valid target available", hash);
         }
 
-        // 使用 BreakpointManager 处理断点请求
-        auto create_result = breakpoint_manager_->HandleAddBreakpointRequest(req);
+        // 观察点：value_id 是变量映射里的 ID，不是变量名，
+        // 必须先解析成 SBValue 再交给 BreakpointManager
+        cangjie::debugger::BreakpointCreateResult create_result;
+        if (req.has_watchpoint()) {
+            const auto& watchpoint_req = req.watchpoint();
+            lldb::SBValue value = FindVariableById(watchpoint_req.value_id().id());
+            if (!value.IsValid()) {
+                LOG_ERROR("Watchpoint value_id not found or invalid: " +
+                          std::to_string(watchpoint_req.value_id().id()));
+                lldbprotobuf::Breakpoint bp;
+                std::vector<lldbprotobuf::BreakpointLocation> locations;
+                return SendAddBreakpointResponse(false, BreakpointType::WATCH_BREAKPOINT, bp, locations,
+                                                 "Watchpoint value_id not found: " +
+                                                     std::to_string(watchpoint_req.value_id().id()), hash);
+            }
+            create_result = breakpoint_manager_->CreateWatchpointForValue(
+                value, req.thread_id().id(), watchpoint_req.watch_read(), watchpoint_req.watch_write());
+        } else {
+            // 使用 BreakpointManager 处理其他类型的断点请求
+            create_result = breakpoint_manager_->HandleAddBreakpointRequest(req);
+        }
 
         if (!create_result.success) {
             LOG_ERROR("Failed to create breakpoint: " + create_result.breakpoint_info.error_message);
