@@ -1,0 +1,4 @@
+// 由 CMake configure_file 生成，请勿手动编辑
+#pragma once
+
+#define CANGJIE_DEBUGGER_VERSION "@PROJECT_VERSION@"

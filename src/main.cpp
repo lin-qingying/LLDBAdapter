@@ -25,7 +25,10 @@
 #include "cangjie/debugger/Logger.h"
 #include "cangjie/debugger/TcpClient.h"
 #include "cangjie/debugger/DebuggerClient.h"
+#include "version.h"
 #include <iostream>
+
+#include "version.h"
 #include <string>
 
 
@@ -38,7 +41,7 @@ int main(int argc, char** argv) {
     Cangjie::Debugger::Logger::Initialize("", Cangjie::Debugger::LogLevel::INFO, true);
     LOG_INFO("CangJie LLDB Frontend starting...");
 
-    std::cout << "CangJie LLDB Frontend v1.0.0" << std::endl;
+    std::cout << "CangJie LLDB Frontend v" << CANGJIE_DEBUGGER_VERSION << std::endl;
     std::cout << std::endl;
 
     if (argc < 2) {

@@ -1,7 +1,14 @@
 
 cmake_minimum_required(VERSION 3.16.3)
 
-project(CangjieDebugger VERSION 1.0.0 LANGUAGES CXX)
+project(CangjieDebugger VERSION 1.1.0 LANGUAGES CXX)
+
+# 生成版本头文件，源码中通过 CANGJIE_DEBUGGER_VERSION 宏引用版本号
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h
+)
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 # 设置 C++ 标准
 set(CMAKE_CXX_STANDARD 17)
