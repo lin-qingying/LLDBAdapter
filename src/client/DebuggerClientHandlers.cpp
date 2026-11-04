@@ -74,8 +74,9 @@ namespace Cangjie::Debugger {
             if (target_.IsValid() && req.options().contains("core_dump")) {
                 const std::string &core_path = req.options().at("core_dump");
                 LOG_INFO("Loading core dump: " + core_path);
-                lldb::SBError core_err = target_.LoadCore(core_path.c_str());
-                if (core_err.Fail()) {
+                lldb::SBProcess core_process = target_.LoadCore(core_path.c_str());
+                if (!core_process.IsValid() || core_process.GetState() == lldb::eStateInvalid) {
+                    lldb::SBError core_err = core_process.GetError();
                     const char *msg = core_err.GetCString();
                     LOG_ERROR("Failed to load core dump: " + std::string(msg ? msg : "Unknown error"));
                     return SendCreateTargetResponse(false, "Failed to load core dump: " +
