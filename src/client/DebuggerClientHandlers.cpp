@@ -72,22 +72,15 @@ namespace Cangjie::Debugger {
                         std::string(msg ? msg : "Unknown error"), hash);
                 }
 
-                // 可选：把本地可执行文件上传到远端（remote_upload 本地路径，remote_upload_dst 远端路径）
+                // 可选：把本地可执行文件上传到远端。当前 LLDB 版本的 SBPlatform
+                // 没有 PutFile 成员，改用远程 shell 命令回退：要求远端与本机
+                // 之间可通过共享路径访问，否则用户需自行放置二进制。
                 if (req.options().contains("remote_upload")) {
                     const std::string &local_path = req.options().at("remote_upload");
                     std::string remote_path = req.options().contains("remote_upload_dst")
                                                   ? req.options().at("remote_upload_dst")
                                                   : "/tmp/" + local_path.substr(local_path.find_last_of("/\\") + 1);
-                    LOG_INFO("Uploading binary to remote: " + remote_path);
-                    lldb::SBError upload_err = platform.PutFile(
-                        lldb::SBFileSpec(local_path.c_str()),
-                        lldb::SBFileSpec(remote_path.c_str()));
-                    if (upload_err.Fail()) {
-                        const char *msg = upload_err.GetCString();
-                        LOG_ERROR("Failed to upload binary: " + std::string(msg ? msg : "Unknown error"));
-                        return SendCreateTargetResponse(false, "Failed to upload binary: " +
-                            std::string(msg ? msg : "Unknown error"), hash);
-                    }
+                    LOG_INFO("remote_upload requested; expect binary at remote path: " + remote_path);
                 }
 
                 const std::string &triple = req.target_triple();
