@@ -331,7 +331,10 @@ namespace Cangjie::Debugger {
         if (cleaned_vars > 0) {
             LOG_INFO("Cleaned up " + std::to_string(cleaned_vars) + " invalid variables during cleanup");
         }
-        variable_id_map_.clear();
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            variable_id_map_.clear();
+        }
 
         // 第五步: 清理调试器
         if (lldb_initialized_ && debugger_.IsValid()) {

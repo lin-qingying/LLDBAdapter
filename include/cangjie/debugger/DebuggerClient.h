@@ -36,6 +36,7 @@
 #include <functional>
 #include <thread>
 #include <atomic>
+#include <mutex>
 #include <optional>
 #include <request.pb.h>
 
@@ -307,9 +308,13 @@ namespace Cangjie {
             mutable lldb::SBListener event_listener_;
 
             // 变量ID到LLDB SBValue的映射表
-            // Key: 变量ID (uint64_t，基于thread_id+frame_index+current_time的哈希)
+            // Key: 变量ID (uint64，由 thread_id+frame_index+地址等确定性哈希生成)
             // Value: LLDB SBValue对象
             mutable std::unordered_map<uint64_t, lldb::SBValue> variable_id_map_;
+
+            // 保护 variable_id_map_ / tracked_modules_ 的互斥锁：
+            // 事件线程与请求主线程都会触碰这些容器
+            mutable std::mutex state_mutex_;
 
             // 模块跟踪 - 用于检测模块卸载
             // Key: 模块UUID字符串, Value: 模块信息

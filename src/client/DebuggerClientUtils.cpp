@@ -38,6 +38,7 @@
 namespace Cangjie::Debugger {
 
  lldb::SBValue DebuggerClient::FindVariableById(uint64_t variable_id) const {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   auto it = variable_id_map_.find(variable_id);
   if (it == variable_id_map_.end()) {
    LOG_ERROR("Variable ID not found in mapping: " + std::to_string(variable_id));
@@ -61,6 +62,8 @@ namespace Cangjie::Debugger {
             LOG_ERROR("Cannot allocate ID for invalid SBValue");
             return 0;
         }
+
+        std::lock_guard<std::mutex> lock(state_mutex_);
 
         // 获取变量的多个属性用于生成确定性哈希
         const char *variable_name = sb_value.GetName();
@@ -113,6 +116,7 @@ namespace Cangjie::Debugger {
         return variable_id;
     }
     size_t DebuggerClient::CleanupInvalidVariables() const {
+     std::lock_guard<std::mutex> lock(state_mutex_);
      size_t cleaned_count = 0;
      auto it = variable_id_map_.begin();
 
